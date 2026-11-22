@@ -54,7 +54,8 @@ export type RunInput<Deps> = {
   workflow: WorkflowDefinition<Deps>;
   model: ModelPort;
   deps: Deps;
-  tenantId: string;
+  // Set by the server from the session; see ToolContext.actorId.
+  actorId: string;
   requestId: string;
   runId?: string;
   // Previous user/assistant turns, sent by the client (the server keeps no conversation).
@@ -71,7 +72,7 @@ export type RunInput<Deps> = {
 export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> {
   const { workflow, model, maxSteps = 6, timeoutMs = 60_000, traceTimeoutMs = 2_000 } = input;
   const runId = input.runId ?? randomUUID();
-  const ctx = { runId, requestId: input.requestId, tenantId: input.tenantId, deps: input.deps };
+  const ctx = { runId, requestId: input.requestId, actorId: input.actorId, deps: input.deps };
   const tools = toToolSpecs(workflow.tools);
   const startedAt = performance.now();
   const deadline = Date.now() + timeoutMs;
@@ -128,7 +129,7 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
         ...input.trace.meta,
         runId,
         workflowId: workflow.id,
-        tenantId: input.tenantId,
+        actorId: input.actorId,
         requestId: input.requestId,
         model: model.id,
         // The conversation the run received (redacted): evaluators need it to tell an id the

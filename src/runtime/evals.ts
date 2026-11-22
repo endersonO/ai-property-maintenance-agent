@@ -16,7 +16,7 @@ export type Fixtures = Record<string, string>;
 export type EvalCase<Deps> = {
   id: string;
   title: string;
-  tenantId: string;
+  actorId: string;
   setup?: (deps: Deps) => void | Fixtures | Promise<void | Fixtures>;
   // Several runs model separate tenant messages (e.g. a retry, or a later request).
   runs: EvalRun[] | ((fixtures: Fixtures) => EvalRun[]);
@@ -38,13 +38,13 @@ export type EvalOutcome = {
 // failing invariant (or an evaluator error) fails an executor eval; monitors are reported.
 function evaluateEvalRun<Deps>(
   workflow: WorkflowDefinition<Deps>,
-  tenantId: string,
   userMessage: string,
   result: RunResult,
   evaluators: Evaluator[],
 ): Evaluation[] {
   if (evaluators.length === 0) return [];
-  const snapshot = snapshotFromResult(result, { workflowId: workflow.id, tenantId, agencyId: null, source: "eval", userMessage });
+  // Eval runs aren't persisted with a tenant or agency; no evaluator depends on them.
+  const snapshot = snapshotFromResult(result, { workflowId: workflow.id, tenantId: null, agencyId: null, source: "eval", userMessage });
   return evaluateRun(snapshot, evaluators);
 }
 
@@ -66,7 +66,7 @@ export async function runExecutorEval<Deps>(
         workflow,
         model: new ScriptedModel(run.script),
         deps,
-        tenantId: evalCase.tenantId,
+        actorId: evalCase.actorId,
         requestId: run.requestId,
         userMessage: run.userMessage,
         trace: { store: traces, meta: { source: "eval", evalCaseId: evalCase.id } },
@@ -87,7 +87,7 @@ export async function runExecutorEval<Deps>(
   }
 
   const evaluations = results.flatMap((result, i) =>
-    evaluateEvalRun(workflow, evalCase.tenantId, runs[i].userMessage, result, evaluators),
+    evaluateEvalRun(workflow, runs[i].userMessage, result, evaluators),
   );
   const kinds = new Map(evaluators.map((e) => [e.id, e.kind]));
   for (const v of evaluations) {
@@ -118,7 +118,7 @@ export function expectations() {
 export type AgentEvalCase<Deps> = {
   id: string;
   title: string;
-  tenantId: string;
+  actorId: string;
   userMessage: string;
   setup?: (deps: Deps) => void | Promise<void>;
   check: (input: { deps: Deps; result: RunResult }) => Promise<string[]>;
@@ -153,7 +153,7 @@ export async function runAgentEval<Deps>(
       workflow,
       model,
       deps,
-      tenantId: evalCase.tenantId,
+      actorId: evalCase.actorId,
       requestId: `${evalCase.id}-${i}`,
       userMessage: evalCase.userMessage,
       timeoutMs: 120_000,
@@ -164,7 +164,7 @@ export async function runAgentEval<Deps>(
         : [`run ${result.status}: ${result.error}`];
     const infraError = result.status === "failed" && INFRA_ERRORS.has(result.error ?? "");
     // Reported next to the case checks, never changing the case's pass/fail.
-    const evaluations = evaluateEvalRun(workflow, evalCase.tenantId, evalCase.userMessage, result, evaluators);
+    const evaluations = evaluateEvalRun(workflow, evalCase.userMessage, result, evaluators);
     attempts.push({ pass: failures.length === 0, infraError, failures, result, evaluations });
   }
   return { id: evalCase.id, title: evalCase.title, passes: attempts.filter((a) => a.pass).length, attempts };

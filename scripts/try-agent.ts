@@ -22,7 +22,7 @@ async function main() {
     workflow: maintenanceWorkflow,
     model,
     deps: { repo },
-    tenantId,
+    actorId: tenantId,
     requestId: randomUUID(),
     userMessage: message,
     timeoutMs: 120_000,

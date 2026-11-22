@@ -33,7 +33,7 @@ async function snapshot(
     workflow: workflows[workflowId],
     model: new ScriptedModel(script),
     deps: { repo: opts.repo ?? repoFor() },
-    tenantId,
+    actorId: tenantId,
     requestId: opts.requestId ?? crypto.randomUUID(),
     userMessage,
     history: opts.history?.map((t): Message =>

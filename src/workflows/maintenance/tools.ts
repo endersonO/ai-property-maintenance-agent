@@ -4,7 +4,7 @@ import { Category, Hazard } from "@/domain/enums";
 import { evaluatePolicy, type PolicyDecision } from "@/domain/policy";
 import { defineTool, type ToolContext } from "@/runtime/types";
 import type { AppDeps } from "../deps";
-import { authorizeTicketOwnership } from "../shared";
+import { authorizeTicketOwnership, tenantOf } from "../shared";
 
 // Tool schemas are strict: arguments the model invents (e.g. `priority`) are rejected.
 // Optional fields are nullable rather than omitted, as provider strict modes require.
@@ -12,8 +12,8 @@ import { authorizeTicketOwnership } from "../shared";
 type Ctx = ToolContext<AppDeps>;
 
 async function tenantContext(ctx: Ctx) {
-  const context = await ctx.deps.repo.getTenantContext(ctx.tenantId);
-  if (!context) throw new Error(`Session tenant ${ctx.tenantId} not found`);
+  const context = await ctx.deps.repo.getTenantContext(tenantOf(ctx));
+  if (!context) throw new Error(`Session tenant ${tenantOf(ctx)} not found`);
   return context;
 }
 
@@ -81,7 +81,7 @@ export const createMaintenanceTicket = defineTool<AppDeps, CreateTicketInput, Ti
       {
         agencyId,
         propertyId: args.property_id,
-        tenantId: ctx.tenantId,
+        tenantId: tenantOf(ctx),
         runId: ctx.runId,
         category: args.category,
         hazards: args.hazards,
@@ -96,7 +96,7 @@ export const createMaintenanceTicket = defineTool<AppDeps, CreateTicketInput, Ti
         ? {
             runId: ctx.runId,
             agencyId,
-            tenantId: ctx.tenantId,
+            tenantId: tenantOf(ctx),
             source: "policy",
             reason: decision.reviewReasons.join("; "),
           }
@@ -133,7 +133,7 @@ export const requestHumanReview = defineTool<AppDeps, RequestReviewInput>({
     const review = await ctx.deps.repo.createReview({
       runId: ctx.runId,
       agencyId: agency.id,
-      tenantId: ctx.tenantId,
+      tenantId: tenantOf(ctx),
       ticketId: args.ticket_id,
       source: "agent",
       reason: args.reason,

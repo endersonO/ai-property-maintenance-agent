@@ -3,9 +3,25 @@ import { Policy } from "@/domain/policy";
 // Same synthetic data as db/seed.sql, for the in-memory repository used by evals.
 // Keep both in sync; the Postgres integration tests compare them.
 
-export const agencies = [
-  { id: "agency_northbridge", name: "Northbridge Lettings" },
-  { id: "agency_harbour_lane", name: "Harbour Lane Estates" },
+// Lifecycle dates (ISO) only for agencies joined by acquisition.
+export type AgencySeed = {
+  id: string;
+  name: string;
+  acquiredOn: string | null;
+  historyStartsOn: string | null;
+  onboardedOn: string | null;
+};
+
+export const agencies: AgencySeed[] = [
+  { id: "agency_northbridge", name: "Northbridge Lettings", acquiredOn: null, historyStartsOn: null, onboardedOn: null },
+  { id: "agency_harbour_lane", name: "Harbour Lane Estates", acquiredOn: null, historyStartsOn: null, onboardedOn: null },
+  {
+    id: "agency_riverside",
+    name: "Riverside Homes",
+    acquiredOn: "2026-03-01",
+    historyStartsOn: "2026-03-01",
+    onboardedOn: "2026-06-01",
+  },
 ];
 
 export const policies = [
@@ -49,6 +65,20 @@ export const policies = [
       reviewAboveGbp: 0,
     }),
   },
+  {
+    agencyId: "agency_riverside",
+    version: 1,
+    policy: Policy.parse({
+      rules: [
+        { if: { hazardsAny: ["gas_smell", "electrical_hazard"] }, priority: "emergency", forceReview: true },
+        { if: { hazardsAny: ["active_water_leak", "no_heating"] }, priority: "high" },
+      ],
+      defaultPriority: "normal",
+      costEstimatesGbp: { plumbing: 160, electrical: 280, heating: 380, appliance: 110 },
+      defaultCostEstimateGbp: 140,
+      reviewAboveGbp: 300,
+    }),
+  },
 ];
 
 export const properties = [
@@ -61,4 +91,13 @@ export const tenants = [
   { id: "tenant_olivia", name: "Olivia Bennett", email: "olivia.bennett@example.com", propertyId: "prop_mcr_1" },
   { id: "tenant_james", name: "James Okafor", email: "james.okafor@example.com", propertyId: "prop_lds_1" },
   { id: "tenant_priya", name: "Priya Shah", email: "priya.shah@example.com", propertyId: "prop_bri_1" },
+];
+
+export const managers = [
+  { id: "manager_north", name: "Alex Morgan (North region)", agencyIds: ["agency_northbridge", "agency_riverside"] },
+  {
+    id: "manager_ops",
+    name: "Sam Taylor (Operations director)",
+    agencyIds: ["agency_harbour_lane", "agency_northbridge", "agency_riverside"],
+  },
 ];

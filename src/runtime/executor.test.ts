@@ -10,7 +10,7 @@ type Deps = { log: string[] };
 const ctx = (): ToolContext<Deps> => ({
   runId: "run-1",
   requestId: "req-1",
-  tenantId: "alice",
+  actorId: "alice",
   deps: { log: [] },
 });
 
@@ -22,7 +22,7 @@ const writeNote = defineTool<Deps, z.infer<typeof noteInput>, { flagged: boolean
   input: noteInput,
   authorize: async (c, args) => {
     c.deps.log.push("authorize");
-    return args.owner === c.tenantId ? null : { code: "forbidden", message: "Not your note" };
+    return args.owner === c.actorId ? null : { code: "forbidden", message: "Not your note" };
   },
   applyPolicy: async (c, args) => {
     c.deps.log.push("policy");

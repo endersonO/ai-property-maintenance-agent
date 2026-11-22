@@ -9,7 +9,7 @@ const workflow: WorkflowDefinition<object> = { id: "toy", systemPrompt: "", tool
 const evalCase: EvalCase<object> = {
   id: "T1",
   title: "toy",
-  tenantId: "t1",
+  actorId: "t1",
   runs: [{ requestId: "r1", userMessage: "hi", script: [{ text: "hello" }] }],
   check: async () => [],
 };

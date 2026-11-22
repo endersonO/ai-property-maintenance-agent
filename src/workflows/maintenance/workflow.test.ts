@@ -32,7 +32,7 @@ describe("maintenance workflow run", () => {
       workflow: maintenanceWorkflow,
       model,
       deps: { repo },
-      tenantId: "tenant_olivia",
+      actorId: "tenant_olivia",
       requestId: "req-1",
       userMessage: "Water is leaking from my ceiling. Please help!",
     });
@@ -65,7 +65,7 @@ describe("maintenance workflow run", () => {
       workflow: maintenanceWorkflow,
       model,
       deps: { repo: new InMemoryRepository() },
-      tenantId: "tenant_olivia",
+      actorId: "tenant_olivia",
       requestId: "req-1",
       userMessage: "hi",
     });

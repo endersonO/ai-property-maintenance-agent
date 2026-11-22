@@ -16,8 +16,9 @@ export type ToolContext<Deps> = {
   runId: string;
   // Stable per user message; retries of the same request reuse it.
   requestId: string;
-  // Identity comes from the session, never from the model.
-  tenantId: string;
+  // Who is acting (a tenant, a manager…), set by the server from the session — never from the
+  // model. Opaque to the runtime; each workflow knows what kind of actor it serves.
+  actorId: string;
   deps: Deps;
 };
 

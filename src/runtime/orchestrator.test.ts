@@ -16,7 +16,7 @@ const ping = defineTool<object, { n: number }>({
 const workflow: WorkflowDefinition<object> = { id: "toy", systemPrompt: "Be brief.", tools: [ping] };
 
 const run = (model: ModelPort, extra: { maxSteps?: number; timeoutMs?: number } = {}) =>
-  runAgent({ workflow, model, deps: {}, tenantId: "t1", requestId: "r1", userMessage: "hi", ...extra });
+  runAgent({ workflow, model, deps: {}, actorId: "t1", requestId: "r1", userMessage: "hi", ...extra });
 
 describe("runAgent", () => {
   it("runs tools, feeds results back and completes with the final answer", async () => {
@@ -105,7 +105,7 @@ describe("runAgent", () => {
       workflow: { ...workflow, tools: [clockJump] },
       model,
       deps: {},
-      tenantId: "t1",
+      actorId: "t1",
       requestId: "r1",
       userMessage: "hi",
       timeoutMs: 1_000,
@@ -128,7 +128,7 @@ describe("runAgent", () => {
       workflow: { ...workflow, tools: [hung] },
       model: new ScriptedModel([{ toolCalls: [{ name: "ping", args: { n: 1 } }] }, { text: "never" }]),
       deps: {},
-      tenantId: "t1",
+      actorId: "t1",
       requestId: "r1",
       userMessage: "hi",
       timeoutMs: 30,

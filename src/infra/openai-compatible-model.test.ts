@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAICompatibleModel } from "./openai-compatible-model";
 import { RateLimitedModel } from "./rate-limited-model";
 
@@ -89,14 +89,17 @@ describe("OpenAICompatibleModel", () => {
 
 describe("RateLimitedModel", () => {
   const ok = { text: "ok", toolCalls: [], usage: { inputTokens: 0, outputTokens: 0 } };
+  // Simulated clock: spacing is asserted exactly, independent of machine load.
+  afterEach(() => vi.useRealTimers());
 
   it("spaces calls to the configured requests per minute", async () => {
-    const model = new RateLimitedModel({ id: "m", next: async () => ok }, 1200); // one call every 50 ms
-    const startedAt = Date.now();
-    await Promise.all([model.next(input), model.next(input), model.next(input)]);
-    // Two waits of 50 ms. Timers can fire a few ms early under load; what matters is that the
-    // calls were spaced, not sent at once (~0 ms).
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(80);
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const model = new RateLimitedModel({ id: "m", next: async () => (calls.push(Date.now()), ok) }, 1200); // one call every 50 ms
+    const all = Promise.all([model.next(input), model.next(input), model.next(input)]);
+    await vi.advanceTimersByTimeAsync(200);
+    await all;
+    expect(calls.map((t) => t - calls[0])).toEqual([0, 50, 100]);
   });
 
   it("puts every retry through the limiter", async () => {
@@ -109,12 +112,12 @@ describe("RateLimitedModel", () => {
         return ok;
       },
     };
-    await new RateLimitedModel(flaky, 1200, 2).next(input);
-    expect(calls).toHaveLength(3);
-    // 1200 RPM = one slot every 50 ms. Timers can fire a few ms early under load; what matters
-    // is that retries wait for the limiter instead of going out immediately.
-    expect(calls[1] - calls[0]).toBeGreaterThanOrEqual(40);
-    expect(calls[2] - calls[1]).toBeGreaterThanOrEqual(40);
+    vi.useFakeTimers();
+    const done = new RateLimitedModel(flaky, 1200, 2).next(input);
+    await vi.advanceTimersByTimeAsync(200);
+    await done;
+    // 1200 RPM = one slot every 50 ms: each retry waits for the limiter.
+    expect(calls.map((t) => t - calls[0])).toEqual([0, 50, 100]);
   });
 
   it("does not retry non-retryable errors", async () => {

@@ -9,7 +9,7 @@ import { maintenanceTools } from "./tools";
 
 function setup(tenantId: string, requestId = "req-1") {
   const repo = new InMemoryRepository();
-  const ctx: ToolContext<AppDeps> = { runId: "run-1", requestId, tenantId, deps: { repo } };
+  const ctx: ToolContext<AppDeps> = { runId: "run-1", requestId, actorId: tenantId, deps: { repo } };
   const call = (name: string, args: unknown, c = ctx) => executeToolCall(maintenanceTools, { name, args }, c);
   return { repo, ctx, call };
 }
@@ -150,7 +150,7 @@ describe("request_human_review", () => {
     const created = await james.call("create_maintenance_ticket", dishwasher("prop_lds_1"));
     const ticketId = (created.result as { data: { ticket_id: string } }).data.ticket_id;
 
-    const olivia = { ...james.ctx, tenantId: "tenant_olivia" };
+    const olivia = { ...james.ctx, actorId: "tenant_olivia" };
     const out = await james.call("request_human_review", { reason: "x", ticket_id: ticketId }, olivia);
     expect(out.result).toMatchObject({ ok: false, stage: "authorize", code: "ticket_not_found" });
   });

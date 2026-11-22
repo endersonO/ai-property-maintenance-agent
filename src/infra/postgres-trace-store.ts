@@ -8,9 +8,10 @@ export class PostgresTraceStore implements TraceStore {
 
   async startRun(run: RunStart): Promise<void> {
     await this.sql`
-      insert into runs (id, workflow_id, agency_id, tenant_id, request_id, source, eval_case_id, model, input)
-      values (${run.runId}, ${run.workflowId}, ${run.agencyId ?? null}, ${run.tenantId}, ${run.requestId},
-              ${run.source}, ${run.evalCaseId ?? null}, ${run.model}, ${this.sql.json(run.input as postgres.JSONValue)})
+      insert into runs (id, workflow_id, agency_id, tenant_id, actor_id, request_id, source, eval_case_id, model, input)
+      values (${run.runId}, ${run.workflowId}, ${run.agencyId ?? null}, ${run.tenantId ?? null}, ${run.actorId},
+              ${run.requestId}, ${run.source}, ${run.evalCaseId ?? null}, ${run.model},
+              ${this.sql.json(run.input as postgres.JSONValue)})
     `;
   }
 

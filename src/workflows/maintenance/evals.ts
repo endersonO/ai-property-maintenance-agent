@@ -40,7 +40,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E1",
     title: "Routine fault at Northbridge: normal priority, no review",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e1",
@@ -60,7 +60,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E2",
     title: "Ceiling leak: emergency, review forced by policy and linked to the ticket",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e2",
@@ -81,7 +81,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E3",
     title: "Same routine fault at Harbour Lane: routed to human review",
-    tenantId: "tenant_priya",
+    actorId: "tenant_priya",
     runs: [
       {
         requestId: "e3",
@@ -101,7 +101,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E4",
     title: "Model targets another tenant's property: rejected at authorize, nothing written",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e4",
@@ -120,7 +120,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E5",
     title: "Model repeats the create call in one request: one ticket, one review",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e5",
@@ -140,7 +140,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E6",
     title: "Invalid or invented arguments: rejected at validate, nothing written",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e6",
@@ -168,7 +168,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E7",
     title: "Review insert fails: no ticket persisted, model told nothing changed",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     setup: (deps) => repoOf(deps).injectFault("review_insert"),
     runs: [
       {
@@ -194,7 +194,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   {
     id: "E9",
     title: "Two separate requests, same category, same day: two tickets, second an emergency",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     runs: [
       {
         requestId: "e9-morning",

@@ -12,7 +12,8 @@
     "db:reset": "set -a && . ./.env.local && db/reset.sh",
     "evals": "tsx evals/run.ts",
     "try": "tsx scripts/try-agent.ts",
-    "evaluate": "tsx scripts/evaluate.ts"
+    "evaluate": "tsx scripts/evaluate.ts",
+    "seed:history": "tsx scripts/seed-history.ts"
   },
   "dependencies": {
     "next": "16.4.6",

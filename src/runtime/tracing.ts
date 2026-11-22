@@ -8,12 +8,14 @@ export type RunMeta = {
   source: "portal" | "eval";
   evalCaseId?: string;
   agencyId?: string;
+  // Set when the actor is a tenant; managers act across agencies and have none.
+  tenantId?: string | null;
 };
 
 export type RunStart = RunMeta & {
   runId: string;
   workflowId: string;
-  tenantId: string;
+  actorId: string;
   requestId: string;
   model: string;
   input: unknown;

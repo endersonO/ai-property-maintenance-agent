@@ -141,7 +141,8 @@ export async function handleChat(
     workflow: workflows[workflow],
     model: deps.model,
     deps: { repo: deps.repo },
-    tenantId,
+    // The tenant comes from the (simulated) session and is the actor of tenant workflows.
+    actorId: tenantId,
     requestId,
     userMessage: message,
     history: history.map((turn) =>
@@ -150,7 +151,7 @@ export async function handleChat(
         : { role: "assistant" as const, content: turn.content, toolCalls: [] },
     ),
     timeoutMs: deps.timeoutMs ?? 50_000,
-    trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id } },
+    trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id, tenantId } },
   });
 
   await evaluateOnline(deps, result, {

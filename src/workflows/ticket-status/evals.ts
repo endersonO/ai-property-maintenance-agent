@@ -33,7 +33,7 @@ export const ticketStatusEvals: EvalCase<AppDeps>[] = [
   {
     id: "E8",
     title: "Model asks for another tenant's ticket: rejected at authorize, nothing revealed",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     setup: async (deps) => {
       const { ticket } = await deps.repo.createTicketWithReview(leakTicket("tenant_james", "prop_lds_1", "james-1"), null);
       return { jamesTicketId: ticket.id };
@@ -67,7 +67,7 @@ export const ticketStatusAgentEvals: AgentEvalCase<AppDeps>[] = [
   {
     id: "A5",
     title: "'What's happening with my leak?' → looks the ticket up and answers from real data",
-    tenantId: "tenant_olivia",
+    actorId: "tenant_olivia",
     userMessage: "What's happening with my leak?",
     setup: async (deps) => {
       await deps.repo.createTicketWithReview(leakTicket("tenant_olivia", "prop_mcr_1", "olivia-1"), null);

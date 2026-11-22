@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Ticket } from "@/domain/repository";
 import { defineTool } from "@/runtime/types";
 import type { AppDeps } from "../deps";
-import { authorizeTicketOwnership } from "../shared";
+import { authorizeTicketOwnership, tenantOf } from "../shared";
 
 // Read-only tools: this workflow answers questions, it never changes a ticket.
 
@@ -26,8 +26,8 @@ export const listMyTickets = defineTool<AppDeps, Record<string, never>>({
   description: "List the tenant's maintenance tickets, newest first. Use it to find the ticket they are asking about.",
   input: z.strictObject({}),
   execute: async (ctx) => {
-    const tickets = await ctx.deps.repo.listTickets(ctx.tenantId);
-    return Promise.all(tickets.map((t) => describe(ctx.deps, ctx.tenantId, t)));
+    const tickets = await ctx.deps.repo.listTickets(tenantOf(ctx));
+    return Promise.all(tickets.map((t) => describe(ctx.deps, tenantOf(ctx), t)));
   },
 });
 
@@ -39,7 +39,7 @@ export const getTicket = defineTool<AppDeps, GetTicketInput>({
   description: "Get one of the tenant's tickets by id.",
   input: GetTicketInput,
   authorize: (ctx, args) => authorizeTicketOwnership(ctx, args.ticket_id),
-  execute: async (ctx, args) => describe(ctx.deps, ctx.tenantId, (await ctx.deps.repo.getTicket(args.ticket_id))!),
+  execute: async (ctx, args) => describe(ctx.deps, tenantOf(ctx), (await ctx.deps.repo.getTicket(args.ticket_id))!),
 });
 
 export const ticketStatusTools = [listMyTickets, getTicket];

@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { getSql } from "@/infra/db";
-import { listRuns, runStats } from "@/infra/inspector-queries";
+import { evaluators } from "@/evaluators";
+import { listRuns, qualityByEvaluator, runStats } from "@/infra/inspector-queries";
 import { headers } from "next/headers";
 import { clientKey } from "@/server/http";
 import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../access-form";
 import { fmtDate, fmtMs, OutcomeBadge } from "./components";
+import { QualityPanel } from "./quality";
 
 async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["searchParams"] }) {
   await connection();
@@ -15,10 +17,12 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
   const access = checkAccess(code, clientKey(await headers()));
   if (access !== "granted") return <AccessForm locked={access === "locked"} />;
   const sql = getSql();
-  const [runs, stats] = await Promise.all([listRuns(sql), runStats(sql)]);
+  const [runs, stats, quality] = await Promise.all([listRuns(sql), runStats(sql), qualityByEvaluator(sql, evaluators)]);
 
   return (
     <>
+      <QualityPanel rows={quality} evaluators={evaluators} />
+      <h2 className="mb-3 text-title font-semibold">Runs</h2>
       <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           ["Runs", String(stats.total)],

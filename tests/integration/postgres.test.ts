@@ -4,10 +4,16 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { repositoryContract } from "@/domain/repository.contract";
 import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
-import { getRunDetail, listRuns, runStats } from "@/infra/inspector-queries";
+import { getRunDetail, listRuns, qualityByEvaluator, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
-import { loadEvaluableRun } from "@/infra/evaluation-store";
-import { snapshotFromResult } from "@/runtime/evaluation";
+import {
+  backfillEvaluations,
+  loadEvaluableRun,
+  PostgresEvaluationStore,
+  runsPendingEvaluation,
+} from "@/infra/evaluation-store";
+import { evaluators } from "@/evaluators";
+import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 import * as seed from "@/infra/seed-data";
 import { ScriptedModel } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
@@ -24,7 +30,7 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
   afterAll(() => sql.end());
 
-  const reset = () => sql`truncate review_queue, tickets, run_events, runs`;
+  const reset = () => sql`truncate run_evaluations, review_queue, tickets, run_events, runs`;
 
   const newRun = async () => {
     const runId = randomUUID();
@@ -215,6 +221,159 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       expect(detail?.reviews[0]).toMatchObject({ source: "policy" });
       expect(await getRunDetail(sql, "not-a-uuid")).toBeNull();
       expect(await runStats(sql)).toMatchObject({ total: 1, failed: 0, withoutToolCalls: 0 });
+    });
+  });
+
+  describe("horizontal evaluation storage", () => {
+    beforeEach(reset);
+
+    const leakRun = (userMessage = "Water is pouring through my ceiling") =>
+      runAgent({
+        workflow: maintenanceWorkflow,
+        model: new ScriptedModel([
+          {
+            toolCalls: [
+              {
+                name: "create_maintenance_ticket",
+                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak" },
+              },
+            ],
+          },
+          { text: "Emergency ticket created." },
+        ]),
+        deps: { repo },
+        tenantId: "tenant_olivia",
+        requestId: randomUUID(),
+        userMessage,
+        trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge" } },
+      });
+
+    const stored = () =>
+      sql`select run_id, evaluator_id, evaluator_version, verdict from run_evaluations order by evaluator_id, evaluator_version`;
+
+    it("backfill evaluates runs missed online, then has nothing left to do", async () => {
+      const run = await leakRun();
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
+
+      expect(await backfillEvaluations(sql, evaluators, null)).toEqual({
+        runs: 1,
+        verdicts: { pass: 2, fail: 0, "n/a": 0, error: 0 },
+      });
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([]);
+      expect((await backfillEvaluations(sql, evaluators, null)).runs).toBe(0);
+    });
+
+    it("backfill gives the same verdicts the online hook would have stored", async () => {
+      const userMessage = "Water is pouring through my ceiling, call 07700 900123";
+      const run = await leakRun(userMessage);
+      const online = evaluateRun(
+        snapshotFromResult(run, { workflowId: "maintenance", tenantId: "tenant_olivia", agencyId: "agency_northbridge", source: "portal", userMessage }),
+        evaluators,
+      );
+      await backfillEvaluations(sql, evaluators, null);
+      const rows = await sql`select evaluator_id, evaluator_version, verdict, evidence from run_evaluations order by evaluator_id`;
+      expect(rows.map((r) => [r.evaluator_id, r.evaluator_version, r.verdict, r.evidence])).toEqual(
+        online.map((v) => [v.evaluatorId, v.evaluatorVersion, v.verdict, v.evidence]),
+      );
+    });
+
+    it("retries error verdicts and re-evaluates when an evaluator's version changes", async () => {
+      const run = await leakRun();
+      const store = new PostgresEvaluationStore(sql);
+      await store.save(evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators));
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([]);
+
+      // An error verdict is not a result: the run is pending again.
+      await sql`update run_evaluations set verdict = 'error' where evaluator_id = 'hazard_logged'`;
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
+      await backfillEvaluations(sql, evaluators, null);
+      expect((await stored()).map((r) => r.verdict)).toEqual(["pass", "pass"]);
+
+      // A new version of an evaluator: old verdicts stay, the run needs the new one.
+      const bumped = evaluators.map((e) => (e.id === "hazard_logged" ? { ...e, version: e.version + 1 } : e));
+      expect(await runsPendingEvaluation(sql, bumped, null)).toEqual([run.runId]);
+      await backfillEvaluations(sql, bumped, null);
+      expect((await stored()).map((r) => [r.evaluator_id, r.evaluator_version])).toEqual([
+        ["emergency_reviewed", 1],
+        ["hazard_logged", 1],
+        ["hazard_logged", 2],
+      ]);
+    });
+
+    it("saving the same verdicts twice keeps one row each", async () => {
+      const run = await leakRun();
+      const verdicts = evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators);
+      const store = new PostgresEvaluationStore(sql);
+      await store.save(verdicts);
+      await store.save(verdicts);
+      expect(await stored()).toHaveLength(2);
+    });
+
+    it("the quality panel counts an unevaluated run as pending, never as a pass", async () => {
+      await leakRun();
+      const before = await qualityByEvaluator(sql, evaluators);
+      expect(before.map((r) => [r.evaluatorId, r.agency, r.eligible, r.pass, r.pending])).toEqual([
+        ["emergency_reviewed", "Northbridge Lettings", 1, 0, 1],
+        ["hazard_logged", "Northbridge Lettings", 1, 0, 1],
+      ]);
+
+      await backfillEvaluations(sql, evaluators, null);
+      const after = await qualityByEvaluator(sql, evaluators);
+      expect(after.map((r) => [r.evaluatorId, r.pass, r.fail, r.notApplicable, r.pending])).toEqual([
+        ["emergency_reviewed", 1, 0, 0, 0],
+        ["hazard_logged", 1, 0, 0, 0],
+      ]);
+    });
+
+    it("a blocked verdict write is cancelled by PostgreSQL, freeing its connection", async () => {
+      const run = await leakRun();
+      const verdicts = evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+      const locker = sql.begin(async (tx) => {
+        await tx`lock table run_evaluations in access exclusive mode`;
+        locked();
+        await held;
+      });
+      await lockTaken;
+      try {
+        const startedAt = Date.now();
+        await expect(new PostgresEvaluationStore(sql, { timeoutMs: 100 }).save(verdicts)).rejects.toThrow(/timeout/);
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+        // The connection went back to the pool: a normal query still runs while the lock is held.
+        expect(await sql`select 1 as ok`).toEqual([{ ok: 1 }]);
+      } finally {
+        release();
+        await locker;
+      }
+    });
+
+    it("the quality panel keeps agencies with the same name apart", async () => {
+      await sql`insert into agencies (id, name) values ('agency_namesake', 'Northbridge Lettings')`;
+      try {
+        await leakRun();
+        await sql`
+          insert into runs (id, workflow_id, agency_id, request_id, source, model, input, status)
+          values (${randomUUID()}, 'maintenance', 'agency_namesake', 'req-namesake', 'portal', 'test', '{"userMessage":"hi"}', 'completed')
+        `;
+        const rows = (await qualityByEvaluator(sql, evaluators)).filter((r) => r.evaluatorId === "hazard_logged");
+        expect(rows.map((r) => [r.agencyId, r.agency, r.eligible])).toEqual([
+          ["agency_namesake", "Northbridge Lettings", 1],
+          ["agency_northbridge", "Northbridge Lettings", 1],
+        ]);
+      } finally {
+        await sql`delete from runs where agency_id = 'agency_namesake'`;
+        await sql`delete from agencies where id = 'agency_namesake'`;
+      }
+    });
+
+    it("only considers runs inside the --since window", async () => {
+      const run = await leakRun();
+      await sql`update runs set created_at = now() - interval '10 days' where id = ${run.runId}`;
+      expect(await runsPendingEvaluation(sql, evaluators, new Date(Date.now() - 7 * 86_400_000))).toEqual([]);
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
     });
   });
 });

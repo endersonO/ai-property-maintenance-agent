@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
-  "drop table if exists review_queue, tickets, run_events, runs, tenants, properties, policies, agencies cascade;"
+  "drop table if exists run_evaluations, review_queue, tickets, run_events, runs, tenants, properties, policies, agencies cascade;"
 
 for f in migrations/*.sql; do
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"

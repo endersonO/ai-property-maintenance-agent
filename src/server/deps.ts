@@ -1,4 +1,5 @@
 import { getSql } from "@/infra/db";
+import { PostgresEvaluationStore } from "@/infra/evaluation-store";
 import { createModelFromEnv } from "@/infra/model-config";
 import { PostgresRepository } from "@/infra/postgres-repository";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
@@ -17,6 +18,8 @@ export function getServerDeps(): ChatDeps {
     model: createModelFromEnv(),
     limiter: new SlidingWindowLimiter(Number(process.env.CHAT_MAX_PER_MINUTE) || 10, 60_000),
     accessCode: process.env.DEMO_ACCESS_CODE || undefined,
+    // Same budget as the chat's evaluation wait: PostgreSQL cancels the write itself.
+    evaluations: new PostgresEvaluationStore(getSql(), { timeoutMs: 300 }),
   };
   return deps;
 }

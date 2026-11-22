@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { Repository, Review, Ticket } from "@/domain/repository";
+import { evaluators as defaultEvaluators } from "@/evaluators";
+import { evaluateRun, snapshotFromResult, type EvaluationStore, type Evaluator } from "@/runtime/evaluation";
 import type { ModelPort } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
 import type { TraceStore } from "@/runtime/tracing";
@@ -34,6 +36,11 @@ export type ChatDeps = {
   accessLimiter?: SlidingWindowLimiter;
   // Run deadline. Below the route's maxDuration, so the run fails cleanly before the platform kills it.
   timeoutMs?: number;
+  // Online horizontal evaluation. Without a store, runs stay pending until the backfill.
+  evaluations?: EvaluationStore;
+  evaluators?: Evaluator[];
+  // Time the reply may wait for verdicts to be saved; past it they are left to the backfill.
+  evaluationBudgetMs?: number;
 };
 
 export type TicketSummary = {
@@ -144,6 +151,8 @@ export async function handleChat(
     trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id } },
   });
 
+  await evaluateOnline(deps, result, { workflowId: workflow, tenantId, agencyId: tenant.agency.id, userMessage: message });
+
   const [tickets, reviews] = await Promise.all([deps.repo.listTickets(tenantId), deps.repo.listReviews(tenantId)]);
   // A failed run may already have written something: say what was kept, never "nothing".
   const ticketInThisRun = tickets.some((t) => t.runId === result.runId);
@@ -171,4 +180,28 @@ export async function handleChat(
         .map((t) => t.id),
     },
   };
+}
+
+// Best effort, bounded: verdicts are evaluated from the run's snapshot and saved within a
+// small budget. A slow or failing store never changes the tenant's reply; the run then has
+// no verdict (shown as pending, never as passing) and the backfill picks it up.
+async function evaluateOnline(
+  deps: ChatDeps,
+  result: Awaited<ReturnType<typeof runAgent>>,
+  meta: { workflowId: string; tenantId: string; agencyId: string; userMessage: string },
+): Promise<void> {
+  if (!deps.evaluations || result.error === "trace_unavailable") return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const snapshot = snapshotFromResult(result, { ...meta, source: "portal" });
+    const verdicts = evaluateRun(snapshot, deps.evaluators ?? defaultEvaluators);
+    const budget = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("evaluation budget exceeded")), deps.evaluationBudgetMs ?? 300);
+    });
+    await Promise.race([deps.evaluations.save(verdicts), budget]);
+  } catch (error) {
+    console.error(`Online evaluation skipped for run ${result.runId}; the backfill will retry`, error);
+  } finally {
+    clearTimeout(timer);
+  }
 }

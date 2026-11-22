@@ -68,6 +68,19 @@ export function evaluateRun(run: EvaluableRun, evaluators: Evaluator[]): Evaluat
   });
 }
 
+// Persistence port for verdicts. Saving is an upsert on (run, evaluator, version).
+export interface EvaluationStore {
+  save(evaluations: Evaluation[]): Promise<void>;
+}
+
+export class InMemoryEvaluationStore implements EvaluationStore {
+  readonly rows = new Map<string, Evaluation>();
+
+  async save(evaluations: Evaluation[]) {
+    for (const e of evaluations) this.rows.set(`${e.runId}|${e.evaluatorId}|${e.evaluatorVersion}`, e);
+  }
+}
+
 export type SnapshotMeta = {
   workflowId: string;
   tenantId: string | null;

@@ -38,3 +38,6 @@ npm-debug.log*
 
 # Design-system export archive (extracted into design/)
 HomeFix.zip
+
+# Browser automation screenshots and logs
+.playwright-mcp/

@@ -136,3 +136,56 @@ export async function getRunDetail(sql: postgres.Sql, runId: string) {
     })),
   };
 }
+
+// Horizontal evaluation per evaluator (current version) × agency × workflow. Every finished
+// run is eligible: a run without a verdict is "pending", never counted as a pass.
+export type QualityRow = {
+  evaluatorId: string;
+  // Grouped by id: agency names are not unique.
+  agencyId: string | null;
+  agency: string;
+  workflowId: string;
+  eligible: number;
+  pass: number;
+  fail: number;
+  notApplicable: number;
+  error: number;
+  pending: number;
+};
+
+export async function qualityByEvaluator(
+  sql: postgres.Sql,
+  evaluators: { id: string; version: number }[],
+): Promise<QualityRow[]> {
+  const ids = evaluators.map((e) => e.id);
+  const versions = evaluators.map((e) => e.version);
+  const rows = await sql`
+    select e.id as evaluator_id, r.agency_id, coalesce(min(a.name), '—') as agency, r.workflow_id,
+           count(*) as eligible,
+           count(*) filter (where v.verdict = 'pass') as pass,
+           count(*) filter (where v.verdict = 'fail') as fail,
+           count(*) filter (where v.verdict = 'n/a') as not_applicable,
+           count(*) filter (where v.verdict = 'error') as error,
+           count(*) filter (where v.verdict is null) as pending
+    from runs r
+    cross join unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
+    left join run_evaluations v
+      on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+    left join agencies a on a.id = r.agency_id
+    where r.status <> 'running'
+    group by e.id, r.agency_id, r.workflow_id
+    order by e.id, agency, r.agency_id, r.workflow_id
+  `;
+  return rows.map((r) => ({
+    evaluatorId: r.evaluator_id,
+    agencyId: r.agency_id,
+    agency: r.agency,
+    workflowId: r.workflow_id,
+    eligible: Number(r.eligible),
+    pass: Number(r.pass),
+    fail: Number(r.fail),
+    notApplicable: Number(r.not_applicable),
+    error: Number(r.error),
+    pending: Number(r.pending),
+  }));
+}

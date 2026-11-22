@@ -109,8 +109,10 @@ describe("RateLimitedModel", () => {
     };
     await new RateLimitedModel(flaky, 1200, 2).next(input);
     expect(calls).toHaveLength(3);
-    expect(calls[1] - calls[0]).toBeGreaterThanOrEqual(45);
-    expect(calls[2] - calls[1]).toBeGreaterThanOrEqual(45);
+    // 1200 RPM = one slot every 50 ms. Timers can fire a few ms early under load; what matters
+    // is that retries wait for the limiter instead of going out immediately.
+    expect(calls[1] - calls[0]).toBeGreaterThanOrEqual(40);
+    expect(calls[2] - calls[1]).toBeGreaterThanOrEqual(40);
   });
 
   it("does not retry non-retryable errors", async () => {

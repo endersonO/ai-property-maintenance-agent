@@ -2,11 +2,21 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { InMemoryRepository } from "@/infra/memory-repository";
 import { ScriptedModel, type ScriptStep } from "@/runtime/model";
+import { InMemoryEvaluationStore, type EvaluationStore, type Evaluator } from "@/runtime/evaluation";
 import { InMemoryTraceStore } from "@/runtime/tracing";
 import { handleChat } from "./chat";
 import { SlidingWindowLimiter } from "./limits";
 
-function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinute?: number; timeoutMs?: number } = {}) {
+function setup(
+  script: ScriptStep[],
+  options: {
+    accessCode?: string;
+    maxPerMinute?: number;
+    timeoutMs?: number;
+    evaluations?: EvaluationStore;
+    evaluators?: Evaluator[];
+  } = {},
+) {
   const deps = {
     repo: new InMemoryRepository(),
     traces: new InMemoryTraceStore(),
@@ -14,6 +24,9 @@ function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinut
     limiter: new SlidingWindowLimiter(options.maxPerMinute ?? 100, 60_000),
     accessCode: options.accessCode,
     timeoutMs: options.timeoutMs,
+    evaluations: options.evaluations,
+    evaluators: options.evaluators,
+    evaluationBudgetMs: 50,
   };
   const send = (body: Record<string, unknown>, accessCode: string | null = null) =>
     handleChat({ tenantId: "tenant_olivia", requestId: randomUUID(), message: "Water is leaking", ...body }, deps, {
@@ -168,5 +181,55 @@ describe("handleChat", () => {
   it("returns 404 for an unknown tenant", async () => {
     const { send } = setup([]);
     expect((await send({ tenantId: "tenant_nobody" })).status).toBe(404);
+  });
+
+  describe("online evaluation", () => {
+    it("stores one versioned verdict per evaluator for the run", async () => {
+      const store = new InMemoryEvaluationStore();
+      const { send } = setup([getContext, createLeak, { text: "Emergency ticket created." }], { evaluations: store });
+      const res = await send({ message: "Water is pouring through my ceiling" });
+
+      if (res.status !== 200) throw new Error("expected 200");
+      const verdicts = [...store.rows.values()].map((v) => [v.runId, v.evaluatorId, v.verdict]);
+      expect(verdicts).toEqual([
+        [res.body.runId, "emergency_reviewed", "pass"],
+        [res.body.runId, "hazard_logged", "pass"],
+      ]);
+    });
+
+    it("keeps the reply unchanged when the store fails", async () => {
+      const failing: EvaluationStore = { save: async () => { throw new Error("db down"); } };
+      const { send } = setup([getContext, createLeak, { text: "Emergency ticket created." }], { evaluations: failing });
+      const res = await send({});
+
+      expect(res).toMatchObject({ status: 200, body: { outcome: "completed", reply: "Emergency ticket created." } });
+    });
+
+    it("does not hold the reply when the store hangs", async () => {
+      const hanging: EvaluationStore = { save: () => new Promise(() => {}) };
+      const { send } = setup([{ text: "What exactly is broken?" }], { evaluations: hanging });
+      const startedAt = Date.now();
+      const res = await send({});
+
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      expect(res).toMatchObject({ status: 200, body: { reply: "What exactly is broken?" } });
+    });
+
+    it("stores an error verdict for a broken evaluator instead of failing the request", async () => {
+      const store = new InMemoryEvaluationStore();
+      const broken: Evaluator = {
+        id: "broken",
+        version: 1,
+        kind: "monitor",
+        description: "",
+        appliesTo: () => true,
+        evaluate: () => { throw new Error("bug"); },
+      };
+      const { send } = setup([{ text: "Hello." }], { evaluations: store, evaluators: [broken] });
+      const res = await send({});
+
+      expect(res.status).toBe(200);
+      expect([...store.rows.values()]).toMatchObject([{ evaluatorId: "broken", verdict: "error", evidence: "bug" }]);
+    });
   });
 });

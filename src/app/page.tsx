@@ -1,14 +1,16 @@
-import Link from "next/link";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import { PostgresRepository } from "@/infra/postgres-repository";
+import { accessGranted, withCode } from "@/server/access";
 import { toTicketSummaries } from "@/server/chat";
+import { AccessForm } from "./access-form";
 import { PortalChat } from "./portal-chat";
 
 type TenantOption = { id: string; name: string; agency: string };
 
 async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
-  const requested = (await searchParams).tenant;
+  const { tenant: requested, code } = await searchParams;
+  if (!accessGranted(code)) return <AccessForm />;
   const sql = getSql();
   const tenants = await sql<TenantOption[]>`
     select t.id, t.name, a.name as agency
@@ -30,6 +32,7 @@ async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchPa
     <>
       {/* Simulated session: a real portal would take the tenant from authentication. */}
       <form method="get" className="mb-2 flex flex-wrap items-end gap-2">
+        {typeof code === "string" && <input type="hidden" name="code" value={code} />}
         <div className="flex flex-col gap-1">
           <label htmlFor="tenant" className="text-label text-muted">
             Signed in as (simulated)
@@ -64,6 +67,8 @@ async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchPa
         tenantId={tenantId}
         tenantName={context?.tenant.name ?? ""}
         initialTickets={toTicketSummaries(tickets, reviews)}
+        accessCode={typeof code === "string" ? code : null}
+        inspectorHref={`/inspector${withCode(code)}`}
       />
     </>
   );
@@ -77,9 +82,6 @@ export default function Home({ searchParams }: PageProps<"/">) {
           <h1 className="text-title-lg font-semibold tracking-tight">HomeFix</h1>
           <p className="text-body text-muted">AI-assisted maintenance · fictional data</p>
         </div>
-        <Link href="/inspector" className="text-body text-accent underline-offset-2 hover:underline">
-          Agent Inspector
-        </Link>
       </header>
       <Suspense fallback={<p className="text-muted">Loading…</p>}>
         <Portal searchParams={searchParams} />

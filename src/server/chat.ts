@@ -4,6 +4,7 @@ import type { ModelPort } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
 import type { TraceStore } from "@/runtime/tracing";
 import { workflowIds, workflows } from "@/workflows";
+import type { SlidingWindowLimiter } from "./limits";
 
 // Chat use case behind POST /api/chat, kept free of Next.js so it can be tested directly.
 
@@ -21,7 +22,15 @@ export const ChatRequest = z.strictObject({
     .default([]),
 });
 
-export type ChatDeps = { repo: Repository; traces: TraceStore; model: ModelPort };
+export type ChatDeps = {
+  repo: Repository;
+  traces: TraceStore;
+  model: ModelPort;
+  // Deterministic abuse limits, checked before the model is called.
+  limiter: SlidingWindowLimiter;
+  // When set (public demo), requests must present it.
+  accessCode?: string;
+};
 
 export type TicketSummary = {
   id: string;
@@ -38,6 +47,8 @@ export type TicketSummary = {
 
 export type ChatResponse =
   | { status: 400; body: { error: "invalid_request"; issues: string } }
+  | { status: 401; body: { error: "access_code_required" } }
+  | { status: 429; body: { error: "rate_limited"; retryAfterSeconds: number } }
   | { status: 404; body: { error: "unknown_tenant" } }
   | {
       status: 200;
@@ -85,7 +96,14 @@ const FAILED_AFTER_WRITE =
   "I couldn't finish my reply, but your request was recorded. You can see it in your tickets below.";
 const FAILED_NOTHING_WRITTEN = "Sorry, something went wrong and nothing was changed. Please try again.";
 
-export async function handleChat(input: unknown, deps: ChatDeps): Promise<ChatResponse> {
+export async function handleChat(
+  input: unknown,
+  deps: ChatDeps,
+  request: { accessCode: string | null } = { accessCode: null },
+): Promise<ChatResponse> {
+  if (deps.accessCode && request.accessCode !== deps.accessCode) {
+    return { status: 401, body: { error: "access_code_required" } };
+  }
   const parsed = ChatRequest.safeParse(input);
   if (!parsed.success) {
     return { status: 400, body: { error: "invalid_request", issues: z.prettifyError(parsed.error) } };
@@ -94,6 +112,11 @@ export async function handleChat(input: unknown, deps: ChatDeps): Promise<ChatRe
 
   const tenant = await deps.repo.getTenantContext(tenantId);
   if (!tenant) return { status: 404, body: { error: "unknown_tenant" } };
+
+  const allowed = deps.limiter.take(tenantId);
+  if (!allowed.ok) {
+    return { status: 429, body: { error: "rate_limited", retryAfterSeconds: Math.ceil(allowed.retryAfterMs / 1000) } };
+  }
 
   const result = await runAgent({
     workflow: workflows[workflow],

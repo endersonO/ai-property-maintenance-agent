@@ -3,10 +3,14 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { getSql } from "@/infra/db";
 import { listRuns, runStats } from "@/infra/inspector-queries";
+import { accessGranted, withCode } from "@/server/access";
+import { AccessForm } from "../access-form";
 import { fmtDate, fmtMs, OutcomeBadge } from "./components";
 
-async function Runs() {
+async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["searchParams"] }) {
   await connection();
+  const { code } = await searchParams;
+  if (!accessGranted(code)) return <AccessForm />;
   const sql = getSql();
   const [runs, stats] = await Promise.all([listRuns(sql), runStats(sql)]);
 
@@ -56,7 +60,7 @@ async function Runs() {
             {runs.map((run) => (
               <tr key={run.id} className="hover:bg-subtle">
                 <th scope="row" className="border-b border-border px-3 py-2 text-left font-normal whitespace-nowrap">
-                  <Link href={`/inspector/${run.id}`} className="text-accent underline-offset-2 hover:underline">
+                  <Link href={`/inspector/${run.id}${withCode(code)}`} className="text-accent underline-offset-2 hover:underline">
                     {fmtDate(run.createdAt)}
                   </Link>
                 </th>
@@ -86,7 +90,7 @@ async function Runs() {
   );
 }
 
-export default function InspectorPage() {
+export default function InspectorPage({ searchParams }: PageProps<"/inspector">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
@@ -99,7 +103,7 @@ export default function InspectorPage() {
         </Link>
       </header>
       <Suspense fallback={<p className="text-muted">Loading runs…</p>}>
-        <Runs />
+        <Runs searchParams={searchParams} />
       </Suspense>
     </main>
   );

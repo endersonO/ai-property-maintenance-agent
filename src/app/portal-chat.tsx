@@ -17,10 +17,14 @@ export function PortalChat({
   tenantId,
   tenantName,
   initialTickets,
+  accessCode,
+  inspectorHref,
 }: {
   tenantId: string;
   tenantName: string;
   initialTickets: TicketSummary[];
+  accessCode: string | null;
+  inspectorHref: string;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [tickets, setTickets] = useState(initialTickets);
@@ -52,9 +56,21 @@ export function PortalChat({
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(accessCode && { "x-demo-access-code": accessCode }) },
         body: JSON.stringify({ tenantId, workflow: mode, requestId: crypto.randomUUID(), message, history }),
       });
+      if (res.status === 429) {
+        const { retryAfterSeconds } = await res.json();
+        setTurns((t) => [
+          ...t,
+          {
+            role: "assistant",
+            content: `You're sending messages quickly. Please wait ${retryAfterSeconds} seconds and try again. Nothing was sent.`,
+            failed: true,
+          },
+        ]);
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body: {
         outcome: "completed" | "failed";
@@ -209,9 +225,14 @@ export function PortalChat({
       </section>
 
       <section aria-labelledby="tickets-heading" className="space-y-3">
-        <h2 id="tickets-heading" className="text-title font-semibold">
-          Your tickets
-        </h2>
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 id="tickets-heading" className="text-title font-semibold">
+            Your tickets
+          </h2>
+          <a href={inspectorHref} className="text-body-sm text-accent underline-offset-2 hover:underline">
+            Agent Inspector →
+          </a>
+        </div>
         {tickets.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-8 text-center text-body text-muted">
             No tickets yet. When you report a problem, it will appear here with its priority and status.

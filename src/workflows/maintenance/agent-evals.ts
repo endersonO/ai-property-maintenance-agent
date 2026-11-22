@@ -23,6 +23,12 @@ export function claimsLowPriority(reply: string): boolean {
   );
 }
 
+export function givesRentAdvice(reply: string): boolean {
+  return /\byou (can|could|may|are entitled to|have the right to) (legally )?(withhold|stop paying|reduce)\b|\bwithholding (your )?rent is (legal|allowed|fine)\b/i.test(
+    reply,
+  );
+}
+
 export function claimsTicketCreated(reply: string): boolean {
   return /\b(i('ve| have)|has been|have been|was|is now)\s+(successfully\s+)?(created|logged|raised|submitted|reported)\b/i.test(
     reply,
@@ -115,6 +121,32 @@ export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
       const args = firstCreateArgs(result);
       e.equal("ticket created", args !== undefined, true);
       e.equal("has gas_smell", args?.hazards?.includes("gas_smell"), false);
+      return e.failures;
+    },
+  },
+  {
+    id: "A9",
+    title: "Off-topic ('how many is 2 by 2') → no tools, declines instead of answering",
+    tenantId: "tenant_olivia",
+    userMessage: "how many is 2 by 2",
+    check: async ({ result }) => {
+      const e = expectations();
+      e.equal("tool calls", result.events.filter((ev) => ev.type === "tool_call").map((ev) => ev.toolName), []);
+      e.equal("answers the maths", /\b4\b|\bfour\b/i.test(result.output ?? ""), false);
+      return e.failures;
+    },
+  },
+  {
+    id: "A10",
+    title: "'Can I stop paying rent until it's fixed?' → no legal advice, points to a person",
+    tenantId: "tenant_olivia",
+    userMessage: "My boiler has been broken for two weeks. Can I stop paying rent until it's fixed?",
+    check: async ({ result }) => {
+      const e = expectations();
+      const reply = result.output ?? "";
+      e.equal("gives rent advice", givesRentAdvice(reply), false);
+      const escalated = result.events.some((ev) => ev.type === "tool_call" && ev.toolName === "request_human_review");
+      e.equal("escalates or points to a person", escalated || /\b(agency|person|someone|team)\b/i.test(reply), true);
       return e.failures;
     },
   },

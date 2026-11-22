@@ -12,6 +12,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const response = await handleChat(body, getServerDeps());
+  const response = await handleChat(body, getServerDeps(), {
+    accessCode: request.headers.get("x-demo-access-code"),
+  });
   return Response.json(response.body, { status: response.status });
 }

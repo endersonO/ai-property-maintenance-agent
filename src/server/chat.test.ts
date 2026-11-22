@@ -4,11 +4,20 @@ import { InMemoryRepository } from "@/infra/memory-repository";
 import { ScriptedModel, type ScriptStep } from "@/runtime/model";
 import { InMemoryTraceStore } from "@/runtime/tracing";
 import { handleChat } from "./chat";
+import { SlidingWindowLimiter } from "./limits";
 
-function setup(script: ScriptStep[]) {
-  const deps = { repo: new InMemoryRepository(), traces: new InMemoryTraceStore(), model: new ScriptedModel(script) };
-  const send = (body: Record<string, unknown>) =>
-    handleChat({ tenantId: "tenant_olivia", requestId: randomUUID(), message: "Water is leaking", ...body }, deps);
+function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinute?: number } = {}) {
+  const deps = {
+    repo: new InMemoryRepository(),
+    traces: new InMemoryTraceStore(),
+    model: new ScriptedModel(script),
+    limiter: new SlidingWindowLimiter(options.maxPerMinute ?? 100, 60_000),
+    accessCode: options.accessCode,
+  };
+  const send = (body: Record<string, unknown>, accessCode: string | null = null) =>
+    handleChat({ tenantId: "tenant_olivia", requestId: randomUUID(), message: "Water is leaking", ...body }, deps, {
+      accessCode,
+    });
   return { deps, send };
 }
 
@@ -91,6 +100,25 @@ describe("handleChat", () => {
   it("rejects an unknown workflow", async () => {
     const { send } = setup([]);
     expect((await send({ workflow: "admin" })).status).toBe(400);
+  });
+
+  it("requires the access code when one is configured, before running anything", async () => {
+    const { deps, send } = setup([{ text: "Hi" }], { accessCode: "demo-123" });
+
+    expect((await send({})).status).toBe(401);
+    expect((await send({}, "wrong")).status).toBe(401);
+    expect(deps.traces.runs.size).toBe(0);
+    expect((await send({}, "demo-123")).status).toBe(200);
+  });
+
+  it("rate-limits a tenant before the model is called", async () => {
+    const { deps, send } = setup([{ text: "1" }, { text: "2" }, { text: "3" }], { maxPerMinute: 2 });
+
+    expect((await send({})).status).toBe(200);
+    expect((await send({})).status).toBe(200);
+    const third = await send({});
+    expect(third).toMatchObject({ status: 429, body: { error: "rate_limited" } });
+    expect(deps.traces.runs.size).toBe(2);
   });
 
   it("returns 404 for an unknown tenant", async () => {

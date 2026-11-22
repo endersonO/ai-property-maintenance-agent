@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import { getRunDetail, type RunEventRow } from "@/infra/inspector-queries";
+import { accessGranted, withCode } from "@/server/access";
+import { AccessForm } from "../../access-form";
 import { PriorityBadge } from "../../ui";
 import { fmtDate, fmtMs, JsonBlock, OutcomeBadge, PipelineStages } from "../components";
 
@@ -67,13 +69,24 @@ function TimelineEvent({ event }: { event: RunEventRow }) {
   );
 }
 
-async function RunDetail({ params }: { params: PageProps<"/inspector/[runId]">["params"] }) {
-  const { runId } = await params;
+async function RunDetail({
+  params,
+  searchParams,
+}: {
+  params: PageProps<"/inspector/[runId]">["params"];
+  searchParams: PageProps<"/inspector/[runId]">["searchParams"];
+}) {
+  const [{ runId }, { code }] = await Promise.all([params, searchParams]);
+  if (!accessGranted(code)) return <AccessForm />;
   const detail = await getRunDetail(getSql(), runId);
   if (!detail) notFound();
   const { run, events, tickets, reviews } = detail;
 
   return (
+    <>
+    <Link href={`/inspector${withCode(code)}`} className="mb-4 inline-block text-body text-accent underline-offset-2 hover:underline">
+      ← All runs
+    </Link>
     <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
       <section aria-labelledby="timeline-heading">
         <h2 id="timeline-heading" className="mb-3 text-title font-semibold">
@@ -151,20 +164,18 @@ async function RunDetail({ params }: { params: PageProps<"/inspector/[runId]">["
         {run.output && <JsonBlock label="Reply to the tenant (redacted)" value={run.output} />}
       </aside>
     </div>
+    </>
   );
 }
 
-export default function RunPage({ params }: PageProps<"/inspector/[runId]">) {
+export default function RunPage({ params, searchParams }: PageProps<"/inspector/[runId]">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-6">
-        <Link href="/inspector" className="text-body text-accent underline-offset-2 hover:underline">
-          ← All runs
-        </Link>
+      <header className="mb-2">
         <h1 className="text-title-lg font-semibold tracking-tight">Run detail</h1>
       </header>
       <Suspense fallback={<p className="text-muted">Loading run…</p>}>
-        <RunDetail params={params} />
+        <RunDetail params={params} searchParams={searchParams} />
       </Suspense>
     </main>
   );

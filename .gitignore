@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env*.local
+
+# Dependencies and build output
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel
+.vercel
+
+# OS / editor
+.DS_Store
+
+# Private working notes (kept local, not published)
+memory/
+plan.md
+
+# Third-party screenshot and superseded draft diagram
+images/image.png
+images/download.svg

@@ -210,6 +210,8 @@ describe("handleChat", () => {
         [res.body.runId, "hazard_logged", "pass"],
         // "Emergency ticket created." is a claim, backed by the ticket the run created.
         [res.body.runId, "claims_match_actions", "pass"],
+        // Only applies to operations briefs.
+        [res.body.runId, "numbers_grounded", "n/a"],
       ]);
     });
 

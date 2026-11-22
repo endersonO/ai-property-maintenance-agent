@@ -81,12 +81,13 @@ async function coverage(sql: postgres.Sql, dataset: Dataset, agencyIds: string[]
 // Every report reads one snapshot: all its queries run in a single REPEATABLE READ, read-only
 // transaction, so a regeneration or a write in between can't mix two versions of the data.
 type Report = { facts: Fact[]; notes: string[] };
-const snapshot = (sql: postgres.Sql, read: (tx: postgres.Sql) => Promise<Report>): Promise<Report> =>
-  sql.begin("isolation level repeatable read read only", (tx) => read(tx as unknown as postgres.Sql)) as Promise<Report>;
+export const readSnapshot = <T>(sql: postgres.Sql, read: (tx: postgres.Sql) => Promise<T>): Promise<T> =>
+  sql.begin("isolation level repeatable read read only", (tx) => read(tx as unknown as postgres.Sql)) as Promise<T>;
+const snapshot = (sql: postgres.Sql, read: (tx: postgres.Sql) => Promise<Report>) => readSnapshot(sql, read);
 
 export const volumeFacts = (sql: postgres.Sql, scope: MetricScope) => snapshot(sql, (tx) => readVolume(tx, scope));
 
-async function readVolume(sql: postgres.Sql, scope: MetricScope): Promise<Report> {
+export async function readVolume(sql: postgres.Sql, scope: MetricScope): Promise<Report> {
   const { current, previous, lastYear, months } = periodRanges(scope.period, scope.asOf);
   const { covered, acquiredWithin } = await coverage(sql, scope.dataset, scope.agencyIds);
   const rows = await sql`
@@ -183,7 +184,7 @@ export type ResolutionScope = MetricScope & { priority?: "emergency" | "high" | 
 
 export const resolutionFacts = (sql: postgres.Sql, scope: ResolutionScope) => snapshot(sql, (tx) => readResolution(tx, scope));
 
-async function readResolution(sql: postgres.Sql, scope: ResolutionScope): Promise<Report> {
+export async function readResolution(sql: postgres.Sql, scope: ResolutionScope): Promise<Report> {
   const { current, months } = periodRanges(scope.period, scope.asOf);
   const { covered } = await coverage(sql, scope.dataset, scope.agencyIds);
   const priority = scope.priority ?? null;
@@ -205,6 +206,11 @@ async function readResolution(sql: postgres.Sql, scope: ResolutionScope): Promis
   if (stateAsOf < scope.asOf) {
     notes.push(`States use the last observed date ${isoDay(stateAsOf)}, not the requested ${isoDay(scope.asOf)}.`);
   }
+  // The cut used inside SQL. For live data it is computed by the database itself: a timestamp
+  // round-tripped through JavaScript loses its microseconds and could drop a change made in the
+  // same millisecond.
+  const cut =
+    scope.dataset === "live" ? sql`least(${scope.asOf}::timestamptz, now())` : sql`${stateAsOf}::timestamptz`;
 
   // Coverage is decided BEFORE aggregating, so the total, shares and percentiles are computed
   // over exactly the agencies that are reported.
@@ -229,22 +235,22 @@ async function readResolution(sql: postgres.Sql, scope: ResolutionScope): Promis
              -- that, with no recorded change before the cut-off to explain it.
              case
                when o.dataset = 'live'
-                    and ${stateAsOf}::timestamptz < tracked.since and o.created_at < tracked.since
+                    and ${cut} < tracked.since and o.created_at < tracked.since
                     and not exists (select 1 from ticket_priority_changes c
-                                    where c.ticket_id = o.ticket_id and c.changed_at < ${stateAsOf}::timestamptz)
+                                    where c.ticket_id = o.ticket_id and c.changed_at < ${cut})
                  then null
                else coalesce(
                  (select c.to_priority from ticket_priority_changes c
-                   where c.ticket_id = o.ticket_id and c.changed_at < ${stateAsOf}::timestamptz
+                   where c.ticket_id = o.ticket_id and c.changed_at < ${cut}
                    order by c.changed_at desc, c.id desc limit 1),
                  (select c.from_priority from ticket_priority_changes c
-                   where c.ticket_id = o.ticket_id and c.changed_at >= ${stateAsOf}::timestamptz
+                   where c.ticket_id = o.ticket_id and c.changed_at >= ${cut}
                    order by c.changed_at asc, c.id asc limit 1),
                  o.priority)
              end as priority_then,
              case
-               when cancelled_at is not null and cancelled_at < ${stateAsOf}::timestamptz then 'cancelled'
-               when resolved_at is not null and resolved_at < ${stateAsOf}::timestamptz then 'resolved'
+               when cancelled_at is not null and cancelled_at < ${cut} then 'cancelled'
+               when resolved_at is not null and resolved_at < ${cut} then 'resolved'
                when status = 'cancelled' and cancelled_at is null then 'cancelled_undated'
                when status = 'resolved' and resolved_at is null then 'undated'
                else 'open'
@@ -267,7 +273,7 @@ async function readResolution(sql: postgres.Sql, scope: ResolutionScope): Promis
              filter (where in_filter and state = 'resolved') as median_hours,
            percentile_cont(0.9) within group (order by extract(epoch from resolved_at - created_at) / 3600)
              filter (where in_filter and state = 'resolved') as p90_hours,
-           percentile_cont(0.5) within group (order by extract(epoch from ${stateAsOf}::timestamptz - created_at) / 86400)
+           percentile_cont(0.5) within group (order by extract(epoch from ${cut} - created_at) / 86400)
              filter (where in_filter and state = 'open') as open_median_age_days
     -- coalesce: an unknown priority compares as null, which must mean "not in the filter".
     from (select *, coalesce(${priority}::text is null or priority_then = ${priority}::text, false) as in_filter from t) f

@@ -15,6 +15,7 @@ import {
 import { evaluators as allEvaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 import { replaceSyntheticHistory } from "@/infra/operations-store";
+import { managerScope, PostgresOperations } from "@/infra/postgres-operations";
 import { resolutionFacts, volumeFacts, type Fact } from "@/infra/operations-queries";
 import { demoHistoryAgencies, generateHistory } from "@/operations/history";
 
@@ -855,16 +856,22 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         return { runId, id: created.id };
       };
       const routineInSeptember = () => routineCreatedOn(new Date("2026-09-10T00:00:00Z"));
-      // For changes that happen at real clock time. The cut-off is fixed when the test starts, a
-      // little ahead so it falls after the changes; the ticket is from the middle of the month
-      // before it, so the last closed month always contains it, whatever day the test runs. States
-      // are read at the database's own "now" (min of cut-off and last observation).
-      const newCutOff = () => new Date(Date.now() + 60_000);
-      const lastMonthMid = (cutOff: Date) => new Date(Date.UTC(cutOff.getUTCFullYear(), cutOff.getUTCMonth() - 1, 15));
-      const emergenciesOpenAt = async (cutOff: Date) => {
-        const facts = (await resolutionFacts(sql, { ...live, asOf: cutOff, period: "last_closed_month" })).facts;
-        return facts.find((f) => f.metric === "open_at_as_of_emergency" && f.agencyId === "agency_northbridge")?.value;
+      // Changes are written at real clock time (that's what is under test: their order), then
+      // moved to fixed October timestamps KEEPING the order they were recorded in. The ticket and
+      // the cut-off are fixed too, so the answer doesn't depend on the day the test runs.
+      const pinChangesToOctober = (ticketId: string) => sql`
+        update ticket_priority_changes c
+        set changed_at = '2026-10-15T00:00:00Z'::timestamptz + o.rn * interval '1 second'
+        from (select id, row_number() over (order by changed_at, id) as rn
+              from ticket_priority_changes where ticket_id = ${ticketId}) o
+        where c.id = o.id
+      `;
+      const emergenciesOpenOnFirstOfNovember = async () => {
+        const scope = { ...live, asOf: new Date("2026-11-01T00:00:00Z"), period: "last_closed_month" as const };
+        const facts = (await resolutionFacts(sql, scope)).facts;
+        return facts.find((f) => f.key === "open_at_as_of_emergency.agency_northbridge.2026-10")?.value;
       };
+      const routineInOctober = () => routineCreatedOn(new Date("2026-10-10T00:00:00Z"));
 
       it("a later escalation doesn't change the earlier report", async () => {
         await sql`update history_tracking set since = '2026-01-01' where subject = 'ticket_priority'`;
@@ -886,21 +893,20 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
       it("several changes in one transaction keep their order (clock time, then id)", async () => {
         await sql`update history_tracking set since = '2026-01-01' where subject = 'ticket_priority'`;
-        const cutOff = newCutOff();
-        const { id } = await routineCreatedOn(lastMonthMid(cutOff));
+        const { id } = await routineInOctober();
         await sql.begin(async (tx) => {
           await tx`update tickets set priority = 'high' where id = ${id}`;
           await tx`update tickets set priority = 'emergency' where id = ${id}`;
         });
         const changes = await sql`select from_priority, to_priority from ticket_priority_changes where ticket_id = ${id} order by changed_at, id`;
         expect(changes.map((c) => `${c.from_priority}->${c.to_priority}`)).toEqual(["normal->high", "high->emergency"]);
-        expect(await emergenciesOpenAt(cutOff)).toBe(1);
+        await pinChangesToOctober(id);
+        expect(await emergenciesOpenOnFirstOfNovember()).toBe(1);
       });
 
       it("concurrent escalations are recorded in the order they happened, not by transaction start", async () => {
         await sql`update history_tracking set since = '2026-01-01' where subject = 'ticket_priority'`;
-        const cutOff = newCutOff();
-        const { id } = await routineCreatedOn(lastMonthMid(cutOff));
+        const { id } = await routineInOctober();
         // Transaction A starts first (its now() is earlier) but escalates last.
         let started!: () => void;
         let proceed!: () => void;
@@ -919,7 +925,8 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
         const [{ priority }] = await sql`select priority from tickets where id = ${id}`;
         expect(priority).toBe("emergency");
-        expect(await emergenciesOpenAt(cutOff)).toBe(1);
+        await pinChangesToOctober(id);
+        expect(await emergenciesOpenOnFirstOfNovember()).toBe(1);
       });
 
       it("before priority changes were recorded, an unexplained priority is unknown, not today's", async () => {
@@ -970,6 +977,41 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         "cancelled_without_date.agency_northbridge.2026-Q3": 1,
       });
       expect(v["median_hours_to_resolve.agency_northbridge.2026-Q3"]).toBeUndefined();
+    });
+  });
+
+  describe("operations port on PostgreSQL", () => {
+    beforeEach(reset);
+
+    it("loads a manager's scope from the database, and null for an unknown one", async () => {
+      expect(await managerScope(sql, "manager_north")).toEqual({
+        managerId: "manager_north",
+        name: "Alex Morgan (North region)",
+        agencyIds: ["agency_northbridge", "agency_riverside"],
+      });
+      expect(await managerScope(sql, "manager_nobody")).toBeNull();
+    });
+
+    it("computes briefs on the synthetic history, with the cut-off read in the same snapshot", async () => {
+      const operations = new PostgresOperations(sql);
+      const query = { period: "last_closed_quarter" as const, agencyIds: ["agency_riverside"] };
+      await expect(operations.volume(query)).rejects.toThrow(/seed:history/);
+      await replaceSyntheticHistory(sql, generateHistory(demoHistoryAgencies()));
+
+      const modes: string[] = [];
+      const spy = {
+        begin: (mode: string, fn: never) => {
+          modes.push(mode);
+          return sql.begin(mode, fn);
+        },
+      } as unknown as postgres.Sql;
+      const report = await new PostgresOperations(spy).volume(query);
+      // Cut-off and facts come from one repeatable-read transaction.
+      expect(modes).toEqual(["isolation level repeatable read read only"]);
+      expect([report.dataset, report.asOf.toISOString()]).toEqual(["synthetic", "2026-11-01T00:00:00.000Z"]);
+      expect(report.facts.every((f) => f.agencyId === "agency_riverside" || f.agencyId === "all")).toBe(true);
+      expect(report.facts[0].period).toBe("2026-Q3");
+      expect(await operations.agencyNames(["agency_riverside"])).toEqual({ agency_riverside: "Riverside Homes" });
     });
   });
 });

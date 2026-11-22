@@ -193,10 +193,10 @@ export async function handleChat(
 }
 
 // Best effort, bounded: verdicts are evaluated from the run's snapshot and saved within a
-// small budget. A slow or failing store never changes the tenant's reply; the run then has
+// small budget. A slow or failing store never changes the reply; the run then has
 // no verdict (shown as pending, never as passing) and the backfill picks it up.
-async function evaluateOnline(
-  deps: ChatDeps,
+export async function evaluateOnline(
+  deps: Pick<ChatDeps, "evaluations" | "evaluators" | "evaluationBudgetMs">,
   result: Awaited<ReturnType<typeof runAgent>>,
   meta: Omit<SnapshotMeta, "source">,
 ): Promise<void> {

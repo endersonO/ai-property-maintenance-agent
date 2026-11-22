@@ -8,6 +8,8 @@ import { maintenanceAgentEvals } from "@/workflows/maintenance/agent-evals";
 import { maintenanceEvals, makeEvalDeps } from "@/workflows/maintenance/evals";
 import { ticketStatusWorkflow } from "@/workflows/ticket-status";
 import { ticketStatusAgentEvals, ticketStatusEvals } from "@/workflows/ticket-status/evals";
+import { operationsBriefWorkflow } from "@/workflows/operations-brief";
+import { makeOpsDeps, operationsBriefEvals } from "@/workflows/operations-brief/evals";
 
 // `pnpm evals`                 executor evals (scripted model). Non-zero exit on failure: gates CI.
 // `pnpm evals --layer agent`   agent evals (real model, pass rates). Reported, never gating.
@@ -73,6 +75,19 @@ async function runExecutorLayer() {
         for (const failure of outcome.failures) console.log(`      ✗ ${failure}`);
         outcome.results.forEach(printTrace);
       }
+    }
+  }
+  // The operations brief has its own dependencies (a manager's scope), so its own loop.
+  console.log(`\nExecutor evals — ${operationsBriefWorkflow.id}\n`);
+  for (const evalCase of operationsBriefEvals) {
+    const outcome = await runExecutorEval(operationsBriefWorkflow, evalCase, makeOpsDeps, evaluators);
+    horizontal.push(...outcome.evaluations);
+    total++;
+    console.log(`  ${outcome.pass ? "PASS" : "FAIL"}  ${outcome.id.padEnd(4)} ${outcome.title}`);
+    if (!outcome.pass) {
+      failed++;
+      for (const failure of outcome.failures) console.log(`      ✗ ${failure}`);
+      outcome.results.forEach(printTrace);
     }
   }
   console.log(`\n${total - failed}/${total} passed\n`);

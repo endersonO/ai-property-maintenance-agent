@@ -5,6 +5,8 @@ import { ticketStatusWorkflow } from "../ticket-status";
 import { ticketStatusEvals } from "../ticket-status/evals";
 import { maintenanceWorkflow } from ".";
 import { maintenanceEvals, makeEvalDeps } from "./evals";
+import { operationsBriefWorkflow } from "../operations-brief";
+import { makeOpsDeps, operationsBriefEvals } from "../operations-brief/evals";
 
 // Runs the executor evals inside `pnpm test` too, so a regression fails the normal test run.
 // The horizontal evaluators run on every eval run: a broken invariant fails the case.
@@ -22,3 +24,10 @@ for (const suite of suites) {
     });
   });
 }
+
+describe("operations-brief executor evals", () => {
+  it.each(operationsBriefEvals.map((c) => [c.id, c] as const))("%s", async (_id, evalCase) => {
+    const outcome = await runExecutorEval(operationsBriefWorkflow, evalCase, makeOpsDeps, evaluators);
+    expect(outcome.failures).toEqual([]);
+  });
+});

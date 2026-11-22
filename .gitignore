@@ -23,3 +23,15 @@ plan.md
 # Third-party screenshot and superseded draft diagram
 images/image.png
 images/download.svg
+
+# Local MCP config (contains the Supabase project ref)
+.mcp.json
+
+# Misc from Next.js defaults
+/build
+*.pem
+npm-debug.log*
+.pnpm-debug.log*
+
+# Local Claude Code settings
+.claude/settings.local.json

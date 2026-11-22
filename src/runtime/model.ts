@@ -33,7 +33,7 @@ export function toToolSpecs<Deps>(tools: AnyTool<Deps>[]): ToolSpec[] {
   }));
 }
 
-type ScriptStep = { text: string } | { toolCalls: { name: string; args: unknown }[] };
+export type ScriptStep = { text: string } | { toolCalls: { name: string; args: unknown }[] };
 
 // Deterministic model for evals: returns predefined steps in order and records what it saw.
 // It can do what a real model rarely does on demand — repeat a call, target another

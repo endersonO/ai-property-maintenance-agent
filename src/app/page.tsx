@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import { PostgresRepository } from "@/infra/postgres-repository";
@@ -71,9 +72,14 @@ async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchPa
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-12">
-      <header className="mb-6">
-        <h1 className="text-title-lg font-semibold tracking-tight">HomeFix</h1>
-        <p className="text-body text-muted">AI-assisted maintenance · fictional data</p>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h1 className="text-title-lg font-semibold tracking-tight">HomeFix</h1>
+          <p className="text-body text-muted">AI-assisted maintenance · fictional data</p>
+        </div>
+        <Link href="/inspector" className="text-body text-accent underline-offset-2 hover:underline">
+          Agent Inspector
+        </Link>
       </header>
       <Suspense fallback={<p className="text-muted">Loading…</p>}>
         <Portal searchParams={searchParams} />

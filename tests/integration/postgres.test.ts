@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { repositoryContract } from "@/domain/repository.contract";
 import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
+import { getRunDetail, listRuns, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
 import * as seed from "@/infra/seed-data";
 import { ScriptedModel } from "@/runtime/model";
@@ -143,6 +144,22 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         [5, "model_call", null, null, "ok"],
       ]);
       expect(rows[0]).toMatchObject({ priority: "emergency", policy_version: 1 });
+
+      // Inspector read model over the same run.
+      const [listed] = await listRuns(sql);
+      expect(listed).toMatchObject({ id: result.runId, status: "completed", toolCalls: 2, agency: "Northbridge Lettings" });
+      const detail = await getRunDetail(sql, result.runId);
+      expect(detail?.events.map((e) => e.toolName ?? e.type)).toEqual([
+        "model_call",
+        "get_property_context",
+        "model_call",
+        "create_maintenance_ticket",
+        "model_call",
+      ]);
+      expect(detail?.tickets[0]).toMatchObject({ priority: "emergency", policyVersion: 1 });
+      expect(detail?.reviews[0]).toMatchObject({ source: "policy" });
+      expect(await getRunDetail(sql, "not-a-uuid")).toBeNull();
+      expect(await runStats(sql)).toMatchObject({ total: 1, failed: 0, withoutToolCalls: 0 });
     });
   });
 });

@@ -80,9 +80,14 @@ export type SnapshotMeta = {
 // and the same JSON serialization as the database (e.g. `undefined` properties disappear),
 // so an evaluator can't tell whether its input came from memory or from Postgres.
 export function snapshotFromResult(result: RunResult, meta: SnapshotMeta): EvaluableRun {
+  // Field by field, never `...meta`: a caller's extra fields (e.g. the history) must not leak
+  // into a snapshot that is evaluated and stored.
   return asStored({
     runId: result.runId,
-    ...meta,
+    workflowId: meta.workflowId,
+    tenantId: meta.tenantId,
+    agencyId: meta.agencyId,
+    source: meta.source,
     userMessage: redact(meta.userMessage),
     status: result.status,
     error: result.error,

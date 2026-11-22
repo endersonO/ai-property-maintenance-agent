@@ -1,3 +1,4 @@
+import { evaluateRun, snapshotFromResult, type Evaluation, type Evaluator } from "./evaluation";
 import { ScriptedModel, type ModelPort, type ScriptStep } from "./model";
 import { runAgent, type RunResult } from "./orchestrator";
 import { InMemoryTraceStore } from "./tracing";
@@ -29,12 +30,29 @@ export type EvalOutcome = {
   pass: boolean;
   failures: string[];
   results: RunResult[];
+  // Horizontal verdicts for every run of the case (the same evaluators used online).
+  evaluations: Evaluation[];
 };
+
+// Horizontal evaluators on an eval run. Invariants must hold whatever the model does, so a
+// failing invariant (or an evaluator error) fails an executor eval; monitors are reported.
+function evaluateEvalRun<Deps>(
+  workflow: WorkflowDefinition<Deps>,
+  tenantId: string,
+  userMessage: string,
+  result: RunResult,
+  evaluators: Evaluator[],
+): Evaluation[] {
+  if (evaluators.length === 0) return [];
+  const snapshot = snapshotFromResult(result, { workflowId: workflow.id, tenantId, agencyId: null, source: "eval", userMessage });
+  return evaluateRun(snapshot, evaluators);
+}
 
 export async function runExecutorEval<Deps>(
   workflow: WorkflowDefinition<Deps>,
   evalCase: EvalCase<Deps>,
   makeDeps: () => Deps,
+  evaluators: Evaluator[] = [],
 ): Promise<EvalOutcome> {
   const deps = makeDeps();
   const fixtures = (await evalCase.setup?.(deps)) ?? {};
@@ -68,7 +86,17 @@ export async function runExecutorEval<Deps>(
     failures.push(`check threw: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  return { id: evalCase.id, title: evalCase.title, pass: failures.length === 0, failures, results };
+  const evaluations = results.flatMap((result, i) =>
+    evaluateEvalRun(workflow, evalCase.tenantId, runs[i].userMessage, result, evaluators),
+  );
+  const kinds = new Map(evaluators.map((e) => [e.id, e.kind]));
+  for (const v of evaluations) {
+    if (v.verdict === "error" || (v.verdict === "fail" && kinds.get(v.evaluatorId) === "invariant")) {
+      failures.push(`horizontal ${v.evaluatorId} ${v.verdict}: ${v.evidence}`);
+    }
+  }
+
+  return { id: evalCase.id, title: evalCase.title, pass: failures.length === 0, failures, results, evaluations };
 }
 
 // Tiny expectation helper for eval checks: collects messages instead of throwing.
@@ -102,7 +130,7 @@ export type AgentEvalOutcome = {
   passes: number;
   // Infrastructure errors (quota, network, timeout) say nothing about the model's decisions:
   // they are reported separately and excluded from the pass rate.
-  attempts: { pass: boolean; infraError: boolean; failures: string[]; result: RunResult }[];
+  attempts: { pass: boolean; infraError: boolean; failures: string[]; result: RunResult; evaluations: Evaluation[] }[];
 };
 
 // Provider/network errors and timeouts only. Unusable model output (`incomplete_response`,
@@ -115,6 +143,7 @@ export async function runAgentEval<Deps>(
   makeDeps: () => Deps,
   model: ModelPort,
   repeats = 3,
+  evaluators: Evaluator[] = [],
 ): Promise<AgentEvalOutcome> {
   const attempts: AgentEvalOutcome["attempts"] = [];
   for (let i = 0; i < repeats; i++) {
@@ -134,7 +163,9 @@ export async function runAgentEval<Deps>(
         ? await evalCase.check({ deps, result }).catch((e: unknown) => [`check threw: ${String(e)}`])
         : [`run ${result.status}: ${result.error}`];
     const infraError = result.status === "failed" && INFRA_ERRORS.has(result.error ?? "");
-    attempts.push({ pass: failures.length === 0, infraError, failures, result });
+    // Reported next to the case checks, never changing the case's pass/fail.
+    const evaluations = evaluateEvalRun(workflow, evalCase.tenantId, evalCase.userMessage, result, evaluators);
+    attempts.push({ pass: failures.length === 0, infraError, failures, result, evaluations });
   }
   return { id: evalCase.id, title: evalCase.title, passes: attempts.filter((a) => a.pass).length, attempts };
 }

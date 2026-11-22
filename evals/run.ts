@@ -1,4 +1,6 @@
+import { evaluators } from "@/evaluators";
 import { createModelFromEnv } from "@/infra/model-config";
+import type { Evaluation } from "@/runtime/evaluation";
 import { runAgentEval, runExecutorEval, type EvalOutcome } from "@/runtime/evals";
 import type { RunResult } from "@/runtime/orchestrator";
 import { maintenanceWorkflow } from "@/workflows/maintenance";
@@ -37,13 +39,33 @@ function printTrace(result: RunResult) {
   if (result.output) console.log(`        reply: ${result.output.replace(/\s+/g, " ").slice(0, 200)}`);
 }
 
+// Horizontal verdicts across every run of the layer: the same table the Inspector shows.
+function printHorizontal(all: Evaluation[]) {
+  console.log("Horizontal evaluators (every run)\n");
+  for (const evaluator of evaluators) {
+    const mine = all.filter((v) => v.evaluatorId === evaluator.id);
+    const count = (verdict: Evaluation["verdict"]) => mine.filter((v) => v.verdict === verdict).length;
+    const [pass, fail] = [count("pass"), count("fail")];
+    const rate = pass + fail === 0 ? "—" : `${Math.round((pass / (pass + fail)) * 100)}%`;
+    console.log(
+      `  ${evaluator.id.padEnd(20)} ${evaluator.kind.padEnd(9)} pass ${pass} · fail ${fail} · n/a ${count("n/a")} · error ${count("error")}  →  ${rate}`,
+    );
+    for (const v of mine.filter((v) => v.verdict === "fail" || v.verdict === "error")) {
+      console.log(`      ✗ run ${v.runId}: ${v.evidence}`);
+    }
+  }
+  console.log("");
+}
+
 async function runExecutorLayer() {
+  const horizontal: Evaluation[] = [];
   let failed = 0;
   let total = 0;
   for (const suite of suites) {
     console.log(`\nExecutor evals — ${suite.workflow.id}\n`);
     for (const evalCase of suite.cases) {
-      const outcome: EvalOutcome = await runExecutorEval(suite.workflow, evalCase, suite.makeDeps);
+      const outcome: EvalOutcome = await runExecutorEval(suite.workflow, evalCase, suite.makeDeps, evaluators);
+      horizontal.push(...outcome.evaluations);
       total++;
       console.log(`  ${outcome.pass ? "PASS" : "FAIL"}  ${outcome.id.padEnd(4)} ${outcome.title}`);
       if (!outcome.pass) {
@@ -54,6 +76,7 @@ async function runExecutorLayer() {
     }
   }
   console.log(`\n${total - failed}/${total} passed\n`);
+  printHorizontal(horizontal);
   process.exitCode = failed > 0 ? 1 : 0;
 }
 
@@ -62,6 +85,7 @@ async function runAgentLayer(repeats: number) {
     process.loadEnvFile(".env.local");
   } catch {}
   const model = createModelFromEnv();
+  const horizontal: Evaluation[] = [];
   let passes = 0;
   let scored = 0;
   let infraErrors = 0;
@@ -69,7 +93,8 @@ async function runAgentLayer(repeats: number) {
   for (const suite of suites) {
     console.log(`\nAgent evals — ${suite.workflow.id} (${model.id}, ${repeats} runs each)\n`);
     for (const evalCase of suite.agentCases.filter((c) => only.length === 0 || only.includes(c.id))) {
-      const outcome = await runAgentEval(suite.workflow, evalCase, suite.makeDeps, model, repeats);
+      const outcome = await runAgentEval(suite.workflow, evalCase, suite.makeDeps, model, repeats, evaluators);
+      horizontal.push(...outcome.attempts.flatMap((a) => a.evaluations));
       const errored = outcome.attempts.filter((a) => a.infraError).length;
       const caseScored = outcome.attempts.length - errored;
       passes += outcome.passes;
@@ -85,6 +110,7 @@ async function runAgentLayer(repeats: number) {
   }
   const rate = scored === 0 ? 0 : Math.round((passes / scored) * 100);
   console.log(`\nPass rate: ${passes}/${scored} (${rate}%)  ·  infra errors: ${infraErrors}  ·  reported, not gating\n`);
+  printHorizontal(horizontal);
 }
 
 const args = process.argv.slice(2);

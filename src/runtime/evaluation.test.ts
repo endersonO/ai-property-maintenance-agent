@@ -73,6 +73,11 @@ describe("snapshotFromResult", () => {
   };
   const meta = { workflowId: "toy", tenantId: "t1", agencyId: "a1", source: "portal" as const, userMessage: "I'm olivia@example.com" };
 
+  it("copies only the snapshot fields from the metadata", () => {
+    const withExtra = { ...meta, history: [{ role: "user", content: "private" }] };
+    expect(snapshotFromResult(result, withExtra)).not.toHaveProperty("history");
+  });
+
   it("serializes like the database: undefined properties are dropped", () => {
     const withUndefined: RunResult = {
       ...result,

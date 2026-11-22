@@ -5,7 +5,7 @@ import type { TicketSummary } from "@/server/chat";
 import { EmergencyNotice, Icon, safetyGuidanceFor, TicketCard } from "./ui";
 
 type Safety = { title: string; steps: string[] };
-type Turn = { role: "user" | "assistant"; content: string; failed?: boolean; safety?: Safety | null };
+type Turn = { role: "user" | "assistant"; content: string; failed?: boolean; safety?: Safety | null; runId?: string };
 
 const MODES = {
   maintenance: { label: "Report a problem", example: "Water is leaking from my ceiling" },
@@ -25,13 +25,11 @@ export function PortalChat({
   tenantName,
   initialTickets,
   accessCode,
-  inspectorHref,
 }: {
   tenantId: string;
   tenantName: string;
   initialTickets: TicketSummary[];
   accessCode: string | null;
-  inspectorHref: string;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [tickets, setTickets] = useState(initialTickets);
@@ -79,6 +77,8 @@ export function PortalChat({
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body: {
+        runId: string;
+        traceAvailable: boolean;
         outcome: "completed" | "failed";
         reply: string;
         tickets: TicketSummary[];
@@ -89,7 +89,14 @@ export function PortalChat({
       const safety = created.map(safetyGuidanceFor).find(Boolean) ?? null;
       setTurns((t) => [
         ...t,
-        { role: "assistant", content: body.reply, failed: body.outcome === "failed", safety },
+        {
+          role: "assistant",
+          content: body.reply,
+          failed: body.outcome === "failed",
+          safety,
+          // Only link to a trace that exists.
+          runId: body.traceAvailable ? body.runId : undefined,
+        },
       ]);
       setTickets(body.tickets);
     } catch {
@@ -199,6 +206,15 @@ export function PortalChat({
                 {turn.content}
               </div>
               {turn.safety && <EmergencyNotice title={turn.safety.title} steps={turn.safety.steps} />}
+              {/* Demo affordance: from a reply to the operator's view of what happened behind it. */}
+              {turn.runId && (
+                <a
+                  href={`/inspector/${turn.runId}${accessCode ? `?code=${encodeURIComponent(accessCode)}` : ""}`}
+                  className="mt-1 text-label text-muted underline-offset-2 hover:text-accent hover:underline"
+                >
+                  View trace →
+                </a>
+              )}
             </li>
           ))}
           {pending && (
@@ -265,9 +281,6 @@ export function PortalChat({
           <h2 id="tickets-heading" className="text-title font-semibold">
             Your tickets
           </h2>
-          <a href={inspectorHref} className="text-body-sm text-accent underline-offset-2 hover:underline">
-            Agent Inspector →
-          </a>
         </div>
         {tickets.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-8 text-center text-body text-muted">

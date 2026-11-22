@@ -60,16 +60,61 @@ const RUN_COLUMNS = (sql: postgres.Sql) => sql`
   (select count(*) from run_events e where e.run_id = r.id and e.type = 'tool_call') as tool_calls
 `;
 
-export async function listRuns(sql: postgres.Sql, limit = 50): Promise<RunRow[]> {
+// Latest runs with their horizontal verdict counts for the current evaluator versions.
+// `failing` narrows the list to runs that evaluator flagged (fail or error): from a metric on
+// the Quality panel to the traces behind it in one click.
+export type RunChecks = { flagged: number; pending: number };
+
+export async function listRuns(
+  sql: postgres.Sql,
+  options: { limit?: number; evaluators?: { id: string; version: number }[]; failing?: string | null } = {},
+): Promise<(RunRow & { checks: RunChecks })[]> {
+  const { limit = 50, evaluators = [], failing = null } = options;
+  const ids = evaluators.map((e) => e.id);
+  const versions = evaluators.map((e) => e.version);
   const rows = await sql`
-    select ${RUN_COLUMNS(sql)}
+    select ${RUN_COLUMNS(sql)}, c.flagged, c.pending
     from runs r
     left join tenants t on t.id = r.tenant_id
     left join agencies a on a.id = r.agency_id
+    cross join lateral (
+      select count(*) filter (where v.verdict in ('fail', 'error')) as flagged,
+             -- A running run has no verdicts yet: pending, never "clear".
+             count(*) filter (where v.verdict is null) as pending
+      from unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
+      left join run_evaluations v
+        on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+    ) c
+    where ${failing}::text is null or exists (
+      select 1
+      from unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
+      join run_evaluations v
+        on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+      where e.id = ${failing}::text and v.verdict in ('fail', 'error')
+    )
     order by r.created_at desc
     limit ${limit}
   `;
-  return rows.map(toRun);
+  return rows.map((r) => ({ ...toRun(r), checks: { flagged: Number(r.flagged), pending: Number(r.pending) } }));
+}
+
+// Verdicts of one run for the current evaluator versions (missing = pending).
+export async function runEvaluations(sql: postgres.Sql, runId: string, evaluators: { id: string; version: number }[]) {
+  if (!UUID.test(runId)) return [];
+  const rows = await sql`
+    select evaluator_id, evaluator_version, verdict, evidence
+    from run_evaluations
+    where run_id = ${runId}
+  `;
+  return evaluators.map((e) => {
+    const row = rows.find((r) => r.evaluator_id === e.id && r.evaluator_version === e.version);
+    return {
+      evaluatorId: e.id,
+      evaluatorVersion: e.version,
+      verdict: (row?.verdict ?? "pending") as "pass" | "fail" | "n/a" | "error" | "pending",
+      evidence: (row?.evidence ?? "") as string,
+    };
+  });
 }
 
 // "Completed without any tool call" is a cheap signal of off-topic use or of the model

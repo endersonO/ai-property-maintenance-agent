@@ -2,13 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
-import { getRunDetail, type RunEventRow } from "@/infra/inspector-queries";
+import { evaluators } from "@/evaluators";
+import { getRunDetail, runEvaluations, type RunEventRow } from "@/infra/inspector-queries";
 import { headers } from "next/headers";
 import { clientKey } from "@/server/http";
 import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../../access-form";
 import { PriorityBadge } from "../../ui";
-import { fmtDate, fmtMs, JsonBlock, OutcomeBadge, PipelineStages } from "../components";
+import { fmtDate, fmtMs, JsonBlock, OutcomeBadge, PipelineStages, VerdictBadge } from "../components";
+import { DemoNav } from "../../site-nav";
 
 function TimelineEvent({ event }: { event: RunEventRow }) {
   const p = event.payload;
@@ -81,7 +83,7 @@ async function RunDetail({
   const [{ runId }, { code }] = await Promise.all([params, searchParams]);
   const access = checkAccess(code, clientKey(await headers()));
   if (access !== "granted") return <AccessForm locked={access === "locked"} />;
-  const detail = await getRunDetail(getSql(), runId);
+  const [detail, verdicts] = await Promise.all([getRunDetail(getSql(), runId), runEvaluations(getSql(), runId, evaluators)]);
   if (!detail) notFound();
   const { run, events, tickets, reviews } = detail;
 
@@ -91,7 +93,8 @@ async function RunDetail({
       ← All runs
     </Link>
     <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-      <section aria-labelledby="timeline-heading">
+      {/* min-w-0: grid items default to min-width:auto, so wide JSON would push the layout off-screen. */}
+      <section aria-labelledby="timeline-heading" className="min-w-0">
         <h2 id="timeline-heading" className="mb-3 text-title font-semibold">
           Timeline
         </h2>
@@ -102,7 +105,25 @@ async function RunDetail({
         </ol>
       </section>
 
-      <aside className="space-y-4">
+      <aside className="min-w-0 space-y-4">
+        <section aria-labelledby="checks-heading" className="space-y-2 rounded-lg border border-border bg-surface p-4 shadow-panel">
+          <h2 id="checks-heading" className="text-title font-semibold">
+            Checks
+          </h2>
+          <ul className="space-y-2">
+            {verdicts.map((v) => (
+              <li key={v.evaluatorId} className="space-y-0.5 text-body-sm">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono">{v.evaluatorId}</span>
+                  <span className="font-mono text-label text-muted">v{v.evaluatorVersion}</span>
+                  <VerdictBadge verdict={v.verdict} />
+                </p>
+                {v.evidence && <p className="break-words text-muted">{v.evidence}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <section className="space-y-2 rounded-lg border border-border bg-surface p-4 shadow-panel">
           <h2 className="text-title font-semibold">Run</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body-sm">
@@ -174,8 +195,9 @@ async function RunDetail({
 export default function RunPage({ params, searchParams }: PageProps<"/inspector/[runId]">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-2">
+      <header className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <h1 className="text-title-lg font-semibold tracking-tight">Run detail</h1>
+        <DemoNav current="inspector" searchParams={searchParams} />
       </header>
       <Suspense fallback={<p className="text-muted">Loading run…</p>}>
         <RunDetail params={params} searchParams={searchParams} />

@@ -27,6 +27,10 @@ export type EvaluableRun = {
   status: RunResult["status"];
   error: string | null;
   userMessage: string;
+  // Earlier turns the run received (client-supplied, redacted). Anything in them was already
+  // known to the tenant. null = not recorded (runs traced before history was stored), which is
+  // different from an empty conversation.
+  history: { role: "user" | "assistant"; content: string }[] | null;
   output: string | null;
   toolCalls: EvaluableToolCall[];
 };
@@ -40,7 +44,9 @@ export type Evaluator = {
   kind: "invariant" | "monitor";
   description: string;
   appliesTo: (run: EvaluableRun) => boolean;
-  evaluate: (run: EvaluableRun) => { verdict: "pass" | "fail"; evidence: string };
+  // n/a from evaluate = applies, but the snapshot lacks what the verdict depends on; the
+  // evidence says what is missing.
+  evaluate: (run: EvaluableRun) => { verdict: "pass" | "fail" | "n/a"; evidence: string };
 };
 
 // pass: criterion met · fail: criterion broken · n/a: does not apply · error: could not evaluate.
@@ -97,6 +103,7 @@ export type SnapshotMeta = {
   agencyId: string | null;
   source: RunMeta["source"];
   userMessage: string;
+  history?: { role: "user" | "assistant"; content: string }[];
 };
 
 // From an in-memory run (online hook, evals). Applies the same redaction as the trace store
@@ -112,6 +119,7 @@ export function snapshotFromResult(result: RunResult, meta: SnapshotMeta): Evalu
     agencyId: meta.agencyId,
     source: meta.source,
     userMessage: redact(meta.userMessage),
+    history: redact(meta.history ?? []),
     status: result.status,
     error: result.error,
     output: redact(result.output),

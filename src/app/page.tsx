@@ -3,10 +3,11 @@ import { getSql } from "@/infra/db";
 import { PostgresRepository } from "@/infra/postgres-repository";
 import { headers } from "next/headers";
 import { clientKey } from "@/server/http";
-import { checkAccess, withCode } from "@/server/access";
+import { checkAccess } from "@/server/access";
 import { toTicketSummaries } from "@/server/chat";
 import { AccessForm } from "./access-form";
 import { PortalChat } from "./portal-chat";
+import { DemoNav } from "./site-nav";
 
 type TenantOption = { id: string; name: string; agency: string };
 
@@ -71,7 +72,6 @@ async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchPa
         tenantName={context?.tenant.name ?? ""}
         initialTickets={toTicketSummaries(tickets, reviews)}
         accessCode={typeof code === "string" ? code : null}
-        inspectorHref={`/inspector${withCode(code)}`}
       />
     </>
   );
@@ -85,6 +85,7 @@ export default function Home({ searchParams }: PageProps<"/">) {
           <h1 className="text-title-lg font-semibold tracking-tight">HomeFix</h1>
           <p className="text-body text-muted">AI-assisted maintenance · fictional data</p>
         </div>
+        <DemoNav current="portal" searchParams={searchParams} />
       </header>
       <Suspense fallback={<p className="text-muted">Loading…</p>}>
         <Portal searchParams={searchParams} />

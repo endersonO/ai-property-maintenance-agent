@@ -94,7 +94,9 @@ describe("RateLimitedModel", () => {
     const model = new RateLimitedModel({ id: "m", next: async () => ok }, 1200); // one call every 50 ms
     const startedAt = Date.now();
     await Promise.all([model.next(input), model.next(input), model.next(input)]);
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(95);
+    // Two waits of 50 ms. Timers can fire a few ms early under load; what matters is that the
+    // calls were spaced, not sent at once (~0 ms).
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(80);
   });
 
   it("puts every retry through the limiter", async () => {

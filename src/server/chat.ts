@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Repository, Review, Ticket } from "@/domain/repository";
 import { evaluators as defaultEvaluators } from "@/evaluators";
-import { evaluateRun, snapshotFromResult, type EvaluationStore, type Evaluator } from "@/runtime/evaluation";
+import { evaluateRun, snapshotFromResult, type EvaluationStore, type Evaluator, type SnapshotMeta } from "@/runtime/evaluation";
 import type { ModelPort } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
 import type { TraceStore } from "@/runtime/tracing";
@@ -66,6 +66,8 @@ export type ChatResponse =
       status: 200;
       body: {
         runId: string;
+        // False when the run could not be traced (no row exists): the portal must not link to it.
+        traceAvailable: boolean;
         outcome: "completed" | "failed";
         reply: string;
         tickets: TicketSummary[];
@@ -151,7 +153,13 @@ export async function handleChat(
     trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id } },
   });
 
-  await evaluateOnline(deps, result, { workflowId: workflow, tenantId, agencyId: tenant.agency.id, userMessage: message });
+  await evaluateOnline(deps, result, {
+    workflowId: workflow,
+    tenantId,
+    agencyId: tenant.agency.id,
+    userMessage: message,
+    history: history.map(({ role, content }) => ({ role, content })),
+  });
 
   const [tickets, reviews] = await Promise.all([deps.repo.listTickets(tenantId), deps.repo.listReviews(tenantId)]);
   // A failed run may already have written something: say what was kept, never "nothing".
@@ -172,6 +180,7 @@ export async function handleChat(
     status: 200,
     body: {
       runId: result.runId,
+      traceAvailable: result.error !== "trace_unavailable",
       outcome: result.status,
       reply,
       tickets: toTicketSummaries(tickets, reviews),
@@ -188,7 +197,7 @@ export async function handleChat(
 async function evaluateOnline(
   deps: ChatDeps,
   result: Awaited<ReturnType<typeof runAgent>>,
-  meta: { workflowId: string; tenantId: string; agencyId: string; userMessage: string },
+  meta: Omit<SnapshotMeta, "source">,
 ): Promise<void> {
   if (!deps.evaluations || result.error === "trace_unavailable") return;
   let timer: ReturnType<typeof setTimeout> | undefined;

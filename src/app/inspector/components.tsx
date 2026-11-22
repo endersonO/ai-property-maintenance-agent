@@ -68,3 +68,34 @@ export const fmtMs = (ms: number | null) => (ms === null ? "—" : ms >= 1000 ? 
 
 export const fmtDate = (d: Date) =>
   new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(d);
+
+// Horizontal verdicts for one run: flagged (fail or error) stands out; pending is explicit.
+export function ChecksCell({ checks }: { checks: { flagged: number; pending: number } }) {
+  if (checks.flagged > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-sm border border-error bg-error-soft px-2 py-0.5 text-label font-medium text-error">
+        <Icon name="alertFill" className="size-3.5" />
+        {checks.flagged} flagged
+      </span>
+    );
+  }
+  if (checks.pending > 0) return <span className="text-label text-muted">{checks.pending} pending</span>;
+  return (
+    <span className="inline-flex items-center gap-1 text-label text-ok">
+      <Icon name="check" className="size-3.5" />
+      clear
+    </span>
+  );
+}
+
+const VERDICT = {
+  pass: "bg-ok-soft text-ok",
+  fail: "bg-error-soft text-error border border-error",
+  error: "bg-error-soft text-error border border-dashed border-error",
+  "n/a": "bg-subtle text-muted",
+  pending: "border border-dashed border-border-strong text-muted",
+} as const;
+
+export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT }) {
+  return <span className={`rounded-sm px-2 py-0.5 text-label font-medium ${VERDICT[verdict]}`}>{verdict}</span>;
+}

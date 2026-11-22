@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { repositoryContract } from "@/domain/repository.contract";
 import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
-import { getRunDetail, listRuns, qualityByEvaluator, runStats } from "@/infra/inspector-queries";
+import { getRunDetail, listRuns, qualityByEvaluator, runEvaluations, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
 import {
   backfillEvaluations,
@@ -12,7 +12,7 @@ import {
   PostgresEvaluationStore,
   runsPendingEvaluation,
 } from "@/infra/evaluation-store";
-import { evaluators } from "@/evaluators";
+import { evaluators as allEvaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 
 const pendingIds = async (...args: Parameters<typeof runsPendingEvaluation>) =>
@@ -128,6 +128,10 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         tenantId: "tenant_olivia",
         requestId: "req-snapshot",
         userMessage,
+        history: [
+          { role: "user", content: "Hi, it's olivia@example.com" },
+          { role: "assistant", content: "Ticket 837217b0-7a4f-440a-b9a3-c54a57ba03f4 is open.", toolCalls: [] },
+        ],
         trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge" } },
       });
 
@@ -137,6 +141,10 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         agencyId: "agency_northbridge",
         source: "portal",
         userMessage,
+        history: [
+          { role: "user", content: "Hi, it's olivia@example.com" },
+          { role: "assistant", content: "Ticket 837217b0-7a4f-440a-b9a3-c54a57ba03f4 is open." },
+        ],
       });
       // Strict: an `undefined` property kept in memory but dropped by JSON would be a difference.
       expect(await loadEvaluableRun(sql, result.runId)).toStrictEqual(fromMemory);
@@ -145,6 +153,21 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         ["execute", "ok"],
       ]);
       expect(fromMemory.userMessage).not.toContain("07700");
+      expect(fromMemory.history?.[0].content).toBe("Hi, it's [email]");
+    });
+
+    it("an old trace with earlier turns but no stored history loads as 'not recorded', not empty", async () => {
+      const withTurns = randomUUID();
+      const withoutTurns = randomUUID();
+      for (const [id, historyLength] of [[withTurns, 2], [withoutTurns, 0]] as const) {
+        await sql`
+          insert into runs (id, workflow_id, tenant_id, request_id, source, model, input, status)
+          values (${id}, 'ticket-status', 'tenant_olivia', 'req-old', 'portal', 'test',
+                  ${sql.json({ userMessage: "Repeat the number?", historyLength })}, 'completed')
+        `;
+      }
+      expect((await loadEvaluableRun(sql, withTurns))?.history).toBeNull();
+      expect((await loadEvaluableRun(sql, withoutTurns))?.history).toEqual([]);
     });
 
     it("does not build a snapshot for a run that is still running", async () => {
@@ -229,6 +252,9 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
   describe("horizontal evaluation storage", () => {
     beforeEach(reset);
+
+    // A fixed pair, so these storage tests don't change every time an evaluator is added.
+    const evaluators = allEvaluators.filter((e) => ["emergency_reviewed", "hazard_logged"].includes(e.id));
 
     const leakRun = (userMessage = "Water is pouring through my ceiling") =>
       runAgent({
@@ -413,6 +439,37 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         await sql`delete from runs where agency_id = 'agency_namesake'`;
         await sql`delete from agencies where id = 'agency_namesake'`;
       }
+    });
+
+    it("lists runs with their checks and filters to the runs an evaluator flagged", async () => {
+      const flaggedRun = await leakRun();
+      const cleanRun = await leakRun();
+      const pendingRun = await leakRun();
+      const store = new PostgresEvaluationStore(sql);
+      for (const run of [flaggedRun, cleanRun]) {
+        await store.save(evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators));
+      }
+      await sql`update run_evaluations set verdict = 'fail' where run_id = ${flaggedRun.runId} and evaluator_id = 'hazard_logged'`;
+
+      const all = await listRuns(sql, { evaluators });
+      const checks = Object.fromEntries(all.map((r) => [r.id, r.checks]));
+      expect(checks[flaggedRun.runId]).toEqual({ flagged: 1, pending: 0 });
+      expect(checks[cleanRun.runId]).toEqual({ flagged: 0, pending: 0 });
+      expect(checks[pendingRun.runId]).toEqual({ flagged: 0, pending: evaluators.length });
+
+      expect((await listRuns(sql, { evaluators, failing: "hazard_logged" })).map((r) => r.id)).toEqual([flaggedRun.runId]);
+      expect(await listRuns(sql, { evaluators, failing: "emergency_reviewed" })).toEqual([]);
+
+      // A run still in progress has no verdicts yet: pending, never "clear".
+      const running = await newRun();
+      expect((await listRuns(sql, { evaluators })).find((r) => r.id === running)?.checks).toEqual({
+        flagged: 0,
+        pending: evaluators.length,
+      });
+
+      const verdicts = await runEvaluations(sql, pendingRun.runId, evaluators);
+      expect(verdicts.map((v) => v.verdict)).toEqual(evaluators.map(() => "pending"));
+      expect((await runEvaluations(sql, flaggedRun.runId, evaluators)).find((v) => v.evaluatorId === "hazard_logged")?.verdict).toBe("fail");
     });
 
     it("only considers runs inside the --since window", async () => {

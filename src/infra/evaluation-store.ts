@@ -11,6 +11,13 @@ import {
 // Builds the evaluable snapshot of a finished run from `runs` + `run_events`. Payloads are
 // already redacted by the orchestrator, so this matches snapshotFromResult for the same run.
 
+// Runs traced before history was stored only have its length: with earlier turns it is
+// "not recorded" (null), not "empty".
+function storedHistory(input: { history?: EvaluableRun["history"]; historyLength?: number }): EvaluableRun["history"] {
+  if (input.history) return input.history;
+  return (input.historyLength ?? 0) > 0 ? null : [];
+}
+
 export async function loadEvaluableRun(sql: postgres.Sql, runId: string): Promise<EvaluableRun | null> {
   const [run] = await sql`
     select id, workflow_id, tenant_id, agency_id, source, status, error, input, output
@@ -31,6 +38,7 @@ export async function loadEvaluableRun(sql: postgres.Sql, runId: string): Promis
     status: run.status,
     error: run.error,
     userMessage: (run.input as { userMessage?: string }).userMessage ?? "",
+    history: storedHistory(run.input as { history?: EvaluableRun["history"]; historyLength?: number }),
     output: run.output,
     toolCalls: events.map(
       (e): EvaluableToolCall => ({

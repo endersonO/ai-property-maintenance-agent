@@ -8,21 +8,42 @@ import { headers } from "next/headers";
 import { clientKey } from "@/server/http";
 import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../access-form";
-import { fmtDate, fmtMs, OutcomeBadge } from "./components";
+import { ChecksCell, fmtDate, fmtMs, OutcomeBadge } from "./components";
 import { QualityPanel } from "./quality";
+import { DemoNav } from "../site-nav";
 
 async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["searchParams"] }) {
   await connection();
-  const { code } = await searchParams;
+  const { code, failing: failingParam } = await searchParams;
   const access = checkAccess(code, clientKey(await headers()));
   if (access !== "granted") return <AccessForm locked={access === "locked"} />;
+  // Only a known evaluator id filters; anything else is ignored.
+  const failing = evaluators.find((e) => e.id === failingParam)?.id ?? null;
   const sql = getSql();
-  const [runs, stats, quality] = await Promise.all([listRuns(sql), runStats(sql), qualityByEvaluator(sql, evaluators)]);
+  const [runs, stats, quality] = await Promise.all([
+    listRuns(sql, { evaluators, failing }),
+    runStats(sql),
+    qualityByEvaluator(sql, evaluators),
+  ]);
+  const link = (extra: Record<string, string>) => {
+    const query = new URLSearchParams({ ...(typeof code === "string" && code ? { code } : {}), ...extra }).toString();
+    return query ? `?${query}` : "";
+  };
 
   return (
     <>
-      <QualityPanel rows={quality} evaluators={evaluators} />
-      <h2 className="mb-3 text-title font-semibold">Runs</h2>
+      <QualityPanel rows={quality} evaluators={evaluators} flaggedHref={(id) => `/inspector${link({ failing: id })}#runs-heading`} />
+      <h2 id="runs-heading" className="mb-3 text-title font-semibold">
+        Runs
+      </h2>
+      {failing && (
+        <p role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-border-strong bg-surface px-3 py-2 text-body-sm">
+          Showing runs flagged by <span className="font-mono">{failing}</span> (fail or error).
+          <Link href={`/inspector${link({})}`} className="text-accent underline-offset-2 hover:underline">
+            Show all runs
+          </Link>
+        </p>
+      )}
       <dl className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           ["Runs", String(stats.total)],
@@ -49,7 +70,7 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
           </caption>
           <thead className="sticky top-0 z-10 bg-subtle text-left text-label text-muted">
             <tr>
-              {["Time", "Workflow", "Tenant", "Agency", "Status", "Tools", "Steps", "Duration", "Tokens", "Source"].map((h) => (
+              {["Time", "Workflow", "Tenant", "Agency", "Status", "Checks", "Tools", "Steps", "Duration", "Tokens", "Source"].map((h) => (
                 <th key={h} scope="col" className="border-b border-border px-3 py-2 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -59,8 +80,8 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
           <tbody>
             {runs.length === 0 && (
               <tr>
-                <td colSpan={10} className="p-8 text-center text-muted">
-                  No runs yet. Send a message from the tenant portal.
+                <td colSpan={11} className="p-8 text-center text-muted">
+                  {failing ? "No runs flagged by this evaluator." : "No runs yet. Send a message from the tenant portal."}
                 </td>
               </tr>
             )}
@@ -77,6 +98,9 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
                 <td className="border-b border-border px-3 py-2">
                   <OutcomeBadge status={run.status} />
                   {run.error && <span className="ml-1 font-mono text-label text-muted">{run.error}</span>}
+                </td>
+                <td className="border-b border-border px-3 py-2 whitespace-nowrap">
+                  <ChecksCell checks={run.checks} />
                 </td>
                 <td className="border-b border-border px-3 py-2 text-right font-mono tabular-nums">{run.toolCalls}</td>
                 <td className="border-b border-border px-3 py-2 text-right font-mono tabular-nums">{run.steps}</td>
@@ -105,9 +129,7 @@ export default function InspectorPage({ searchParams }: PageProps<"/inspector">)
           <h1 className="text-title-lg font-semibold tracking-tight">Agent Inspector</h1>
           <p className="text-body text-muted">Every run, step by step · newest first</p>
         </div>
-        <Link href="/" className="text-body text-accent underline-offset-2 hover:underline">
-          Tenant portal
-        </Link>
+        <DemoNav current="inspector" searchParams={searchParams} />
       </header>
       <Suspense fallback={<p className="text-muted">Loading runs…</p>}>
         <Runs searchParams={searchParams} />

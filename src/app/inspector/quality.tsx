@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Evaluator } from "@/runtime/evaluation";
 import type { QualityRow } from "@/infra/inspector-queries";
 
@@ -52,7 +53,15 @@ const Counts = ({ t }: { t: Totals }) => (
   </span>
 );
 
-export function QualityPanel({ rows, evaluators }: { rows: QualityRow[]; evaluators: Evaluator[] }) {
+export function QualityPanel({
+  rows,
+  evaluators,
+  flaggedHref,
+}: {
+  rows: QualityRow[];
+  evaluators: Evaluator[];
+  flaggedHref: (evaluatorId: string) => string;
+}) {
   return (
     <section aria-labelledby="quality-heading" className="mb-8 space-y-3">
       <div>
@@ -94,14 +103,23 @@ export function QualityPanel({ rows, evaluators }: { rows: QualityRow[]; evaluat
                 </p>
               </div>
               <Coverage t={t} />
+              {t.fail + t.error > 0 && (
+                <Link href={flaggedHref(evaluator.id)} className="inline-block text-body-sm text-accent underline-offset-2 hover:underline">
+                  Show {t.fail + t.error} flagged run{t.fail + t.error > 1 ? "s" : ""} →
+                </Link>
+              )}
               {mine.length > 0 && (
                 <div tabIndex={0} role="region" aria-label={`${evaluator.id} by agency and workflow`} className="overflow-x-auto">
                   <table className="w-full text-body-sm">
                     <caption className="sr-only">{evaluator.id} by agency and workflow</caption>
                     <thead className="text-left text-label text-muted">
                       <tr>
-                        {["Agency", "Workflow", "Pass rate", "Verdicts", "Pending", "Errors"].map((h) => (
-                          <th key={h} scope="col" className="border-b border-border py-1 pr-3 font-medium whitespace-nowrap">
+                        {["Agency", "Workflow", "Rate", "Pass", "Fail", "N/a", "Pending", "Errors"].map((h, i) => (
+                          <th
+                            key={h}
+                            scope="col"
+                            className={`border-b border-border py-1 pr-2 font-medium whitespace-nowrap ${i >= 2 ? "text-right" : ""}`}
+                          >
                             {h}
                           </th>
                         ))}
@@ -110,16 +128,16 @@ export function QualityPanel({ rows, evaluators }: { rows: QualityRow[]; evaluat
                     <tbody>
                       {mine.map((r) => (
                         <tr key={`${r.agencyId ?? "none"}|${r.workflowId}`}>
-                          <th scope="row" className="py-1 pr-3 text-left font-normal whitespace-nowrap">
+                          <th scope="row" className="py-1 pr-2 text-left font-normal">
                             {r.agency}
                           </th>
-                          <td className="py-1 pr-3 font-mono">{r.workflowId}</td>
-                          <td className="py-1 pr-3 font-mono tabular-nums">{passRate(r)}</td>
-                          <td className="py-1 pr-3 whitespace-nowrap">
-                            <Counts t={r} />
-                          </td>
-                          <td className="py-1 pr-3 font-mono tabular-nums">{r.pending}</td>
-                          <td className={`py-1 pr-3 font-mono tabular-nums ${r.error ? "text-error" : ""}`}>{r.error}</td>
+                          <td className="py-1 pr-2 font-mono whitespace-nowrap">{r.workflowId}</td>
+                          <td className="py-1 pr-2 text-right font-mono tabular-nums">{passRate(r)}</td>
+                          <td className={`py-1 pr-2 text-right font-mono tabular-nums ${r.pass ? "text-ok" : ""}`}>{r.pass}</td>
+                          <td className={`py-1 pr-2 text-right font-mono tabular-nums ${r.fail ? "text-error" : ""}`}>{r.fail}</td>
+                          <td className="py-1 pr-2 text-right font-mono tabular-nums">{r.notApplicable}</td>
+                          <td className="py-1 pr-2 text-right font-mono tabular-nums">{r.pending}</td>
+                          <td className={`py-1 text-right font-mono tabular-nums ${r.error ? "text-error" : ""}`}>{r.error}</td>
                         </tr>
                       ))}
                     </tbody>

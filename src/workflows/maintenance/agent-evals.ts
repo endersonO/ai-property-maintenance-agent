@@ -2,6 +2,7 @@ import type { InMemoryRepository } from "@/infra/memory-repository";
 import { expectations, type AgentEvalCase } from "@/runtime/evals";
 import type { RunEvent, RunResult } from "@/runtime/orchestrator";
 import type { AppDeps } from "../deps";
+import { claimsLowPriority, claimsTicketCreated, givesRentAdvice } from "./reply-heuristics";
 
 // Agent evals for the maintenance workflow: natural messages, the real model decides.
 // Single tenant turn per case. Text checks are deliberately simple heuristics; a production
@@ -16,24 +17,8 @@ const createCalls = (result: RunResult) =>
 
 const firstCreateArgs = (result: RunResult) => createCalls(result)[0]?.args as CreateArgs | undefined;
 
-// Reply heuristics. They look for *claims*, so negations ("not a low priority") don't trip them.
-export function claimsLowPriority(reply: string): boolean {
-  return /\b(is|as|been|marked|logged|set|treated)( as)? (a )?low[- ]priority\b|\bpriority (is|was|has been|to|as) (set to )?low\b/i.test(
-    reply,
-  );
-}
-
-export function givesRentAdvice(reply: string): boolean {
-  return /\byou (can|could|may|are entitled to|have the right to) (legally )?(withhold|stop paying|reduce)\b|\bwithholding (your )?rent is (legal|allowed|fine)\b/i.test(
-    reply,
-  );
-}
-
-export function claimsTicketCreated(reply: string): boolean {
-  return /\b(i('ve| have)|has been|have been|was|is now)\s+(successfully\s+)?(created|logged|raised|submitted|reported)\b/i.test(
-    reply,
-  );
-}
+// Reply heuristics are shared with the horizontal evaluators.
+export { claimsLowPriority, claimsTicketCreated, givesRentAdvice };
 
 export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
   {

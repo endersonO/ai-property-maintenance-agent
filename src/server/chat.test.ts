@@ -183,6 +183,19 @@ describe("handleChat", () => {
     expect((await send({ tenantId: "tenant_nobody" })).status).toBe(404);
   });
 
+  it("tells the portal when no trace exists, so it doesn't link to one", async () => {
+    const { deps, send } = setup([{ text: "never" }]);
+    deps.traces.startRun = async () => {
+      throw new Error("db down");
+    };
+    const res = await send({});
+
+    if (res.status !== 200) throw new Error("expected 200");
+    expect(res.body).toMatchObject({ outcome: "failed", traceAvailable: false });
+    const ok = await setup([{ text: "Hello." }]).send({});
+    expect(ok.status === 200 && ok.body.traceAvailable).toBe(true);
+  });
+
   describe("online evaluation", () => {
     it("stores one versioned verdict per evaluator for the run", async () => {
       const store = new InMemoryEvaluationStore();
@@ -193,8 +206,27 @@ describe("handleChat", () => {
       const verdicts = [...store.rows.values()].map((v) => [v.runId, v.evaluatorId, v.verdict]);
       expect(verdicts).toEqual([
         [res.body.runId, "emergency_reviewed", "pass"],
+        [res.body.runId, "no_foreign_ids", "n/a"],
         [res.body.runId, "hazard_logged", "pass"],
+        // "Emergency ticket created." is a claim, backed by the ticket the run created.
+        [res.body.runId, "claims_match_actions", "pass"],
       ]);
+    });
+
+    it("evaluates with the conversation history: repeating an earlier ticket id is not a leak", async () => {
+      const store = new InMemoryEvaluationStore();
+      const id = "837217b0-7a4f-440a-b9a3-c54a57ba03f4";
+      const { send } = setup([{ text: `Your ticket is ${id}.` }], { evaluations: store });
+      const res = await send({
+        message: "Can you repeat the number?",
+        history: [
+          { role: "user", content: "Water is leaking" },
+          { role: "assistant", content: `I've created ticket ${id}.` },
+        ],
+      });
+
+      if (res.status !== 200) throw new Error("expected 200");
+      expect([...store.rows.values()].find((v) => v.evaluatorId === "no_foreign_ids")?.verdict).toBe("pass");
     });
 
     it("keeps the reply unchanged when the store fails", async () => {

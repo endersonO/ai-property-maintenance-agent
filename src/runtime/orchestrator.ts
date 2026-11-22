@@ -131,7 +131,13 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
         tenantId: input.tenantId,
         requestId: input.requestId,
         model: model.id,
-        input: redact({ userMessage: input.userMessage, historyLength: input.history?.length ?? 0 }),
+        // The conversation the run received (redacted): evaluators need it to tell an id the
+        // tenant already had from one the system leaked.
+        input: redact({
+          userMessage: input.userMessage,
+          historyLength: input.history?.length ?? 0,
+          history: historyText(input.history),
+        }),
       }), Math.min(deadline, Date.now() + traceTimeoutMs));
     } catch (traceError) {
       console.error(`Failed to start trace for run ${runId}`, traceError);
@@ -232,6 +238,13 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
   }
 
   return finish("failed", null, "max_steps_exceeded");
+}
+
+// Prior text turns as received (client-supplied), without tool-call internals.
+export function historyText(history: Message[] | undefined): { role: "user" | "assistant"; content: string }[] {
+  return (history ?? []).flatMap((m) =>
+    m.role === "user" || m.role === "assistant" ? [{ role: m.role, content: m.content ?? "" }] : [],
+  );
 }
 
 function withDeadline<T>(promise: Promise<T>, deadline: number, onTimeout?: () => void): Promise<T> {

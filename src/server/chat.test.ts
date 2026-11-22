@@ -80,6 +80,19 @@ describe("handleChat", () => {
     expect(deps.traces.runs.size).toBe(0);
   });
 
+  it("routes to the requested workflow", async () => {
+    const { deps, send } = setup([{ toolCalls: [{ name: "list_my_tickets", args: {} }] }, { text: "No tickets." }]);
+    const res = await send({ workflow: "ticket-status" });
+
+    expect(res.status === 200 && res.body.outcome).toBe("completed");
+    expect(res.status === 200 && deps.traces.runs.get(res.body.runId)?.workflowId).toBe("ticket-status");
+  });
+
+  it("rejects an unknown workflow", async () => {
+    const { send } = setup([]);
+    expect((await send({ workflow: "admin" })).status).toBe(400);
+  });
+
   it("returns 404 for an unknown tenant", async () => {
     const { send } = setup([]);
     expect((await send({ tenantId: "tenant_nobody" })).status).toBe(404);

@@ -7,7 +7,11 @@ import { EmergencyNotice, Icon, safetyGuidanceFor, TicketCard } from "./ui";
 type Safety = { title: string; steps: string[] };
 type Turn = { role: "user" | "assistant"; content: string; failed?: boolean; safety?: Safety | null };
 
-const EXAMPLE = "Water is leaking from my ceiling";
+const MODES = {
+  maintenance: { label: "Report a problem", example: "Water is leaking from my ceiling" },
+  "ticket-status": { label: "Ask about a ticket", example: "What's happening with my leak?" },
+} as const;
+type Mode = keyof typeof MODES;
 
 export function PortalChat({
   tenantId,
@@ -22,6 +26,7 @@ export function PortalChat({
   const [tickets, setTickets] = useState(initialTickets);
   const [pending, setPending] = useState(false);
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<Mode>("maintenance");
   const formRef = useRef<HTMLFormElement>(null);
   const logRef = useRef<HTMLOListElement>(null);
 
@@ -48,7 +53,7 @@ export function PortalChat({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tenantId, requestId: crypto.randomUUID(), message, history }),
+        body: JSON.stringify({ tenantId, workflow: mode, requestId: crypto.randomUUID(), message, history }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body: {
@@ -90,9 +95,31 @@ export function PortalChat({
         aria-labelledby="chat-heading"
         className="flex min-h-[32rem] flex-col rounded-lg border border-border bg-surface shadow-panel"
       >
-        <h2 id="chat-heading" className="border-b border-border px-5 py-4 text-title font-semibold">
-          Report a problem
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <h2 id="chat-heading" className="text-title font-semibold">
+            Assistant
+          </h2>
+          {/* Each mode is a separate workflow on the same runtime. */}
+          <fieldset className="flex rounded-md border border-border-strong p-0.5">
+            <legend className="sr-only">What do you need?</legend>
+            {(Object.keys(MODES) as Mode[]).map((m) => (
+              <label
+                key={m}
+                className="cursor-pointer rounded px-3 py-1 text-body has-[:checked]:bg-accent has-[:checked]:text-accent-text has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"
+              >
+                <input
+                  type="radio"
+                  name="mode"
+                  value={m}
+                  checked={mode === m}
+                  onChange={() => setMode(m)}
+                  className="sr-only"
+                />
+                {MODES[m].label}
+              </label>
+            ))}
+          </fieldset>
+        </div>
 
         <ol ref={logRef} role="log" aria-live="polite" aria-label="Conversation" className="flex-1 space-y-4 overflow-y-auto p-5">
           {turns.length === 0 && (
@@ -100,10 +127,10 @@ export function PortalChat({
               <p className="text-body-lg">Hi {tenantName}. Tell me what&apos;s wrong in your home.</p>
               <button
                 type="button"
-                onClick={() => setDraft(EXAMPLE)}
+                onClick={() => setDraft(MODES[mode].example)}
                 className="rounded-md border border-border-strong bg-surface px-3 py-1.5 text-body hover:bg-subtle"
               >
-                Try: &ldquo;{EXAMPLE}&rdquo;
+                Try: &ldquo;{MODES[mode].example}&rdquo;
               </button>
             </li>
           )}

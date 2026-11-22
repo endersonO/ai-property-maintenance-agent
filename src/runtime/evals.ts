@@ -9,13 +9,16 @@ import type { WorkflowDefinition } from "./types";
 
 export type EvalRun = { requestId: string; userMessage: string; script: ScriptStep[] };
 
+// Values created during setup (e.g. another tenant's ticket id) that scripts can refer to.
+export type Fixtures = Record<string, string>;
+
 export type EvalCase<Deps> = {
   id: string;
   title: string;
   tenantId: string;
-  setup?: (deps: Deps) => void | Promise<void>;
+  setup?: (deps: Deps) => void | Fixtures | Promise<void | Fixtures>;
   // Several runs model separate tenant messages (e.g. a retry, or a later request).
-  runs: EvalRun[];
+  runs: EvalRun[] | ((fixtures: Fixtures) => EvalRun[]);
   // Returns the failed expectations; empty means the case passed.
   check: (input: { deps: Deps; results: RunResult[] }) => Promise<string[]>;
 };
@@ -34,11 +37,12 @@ export async function runExecutorEval<Deps>(
   makeDeps: () => Deps,
 ): Promise<EvalOutcome> {
   const deps = makeDeps();
-  await evalCase.setup?.(deps);
+  const fixtures = (await evalCase.setup?.(deps)) ?? {};
   const traces = new InMemoryTraceStore();
+  const runs = typeof evalCase.runs === "function" ? evalCase.runs(fixtures) : evalCase.runs;
 
   const results: RunResult[] = [];
-  for (const run of evalCase.runs) {
+  for (const run of runs) {
     results.push(
       await runAgent({
         workflow,

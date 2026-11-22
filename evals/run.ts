@@ -4,6 +4,8 @@ import type { RunResult } from "@/runtime/orchestrator";
 import { maintenanceWorkflow } from "@/workflows/maintenance";
 import { maintenanceAgentEvals } from "@/workflows/maintenance/agent-evals";
 import { maintenanceEvals, makeEvalDeps } from "@/workflows/maintenance/evals";
+import { ticketStatusWorkflow } from "@/workflows/ticket-status";
+import { ticketStatusAgentEvals, ticketStatusEvals } from "@/workflows/ticket-status/evals";
 
 // `pnpm evals`                 executor evals (scripted model). Non-zero exit on failure: gates CI.
 // `pnpm evals --layer agent`   agent evals (real model, pass rates). Reported, never gating.
@@ -13,6 +15,12 @@ const suites = [
     workflow: maintenanceWorkflow,
     cases: maintenanceEvals,
     agentCases: maintenanceAgentEvals,
+    makeDeps: makeEvalDeps,
+  },
+  {
+    workflow: ticketStatusWorkflow,
+    cases: ticketStatusEvals,
+    agentCases: ticketStatusAgentEvals,
     makeDeps: makeEvalDeps,
   },
 ];
@@ -60,7 +68,7 @@ async function runAgentLayer(repeats: number) {
 
   for (const suite of suites) {
     console.log(`\nAgent evals — ${suite.workflow.id} (${model.id}, ${repeats} runs each)\n`);
-    for (const evalCase of suite.agentCases) {
+    for (const evalCase of suite.agentCases.filter((c) => only.length === 0 || only.includes(c.id))) {
       const outcome = await runAgentEval(suite.workflow, evalCase, suite.makeDeps, model, repeats);
       const errored = outcome.attempts.filter((a) => a.infraError).length;
       const caseScored = outcome.attempts.length - errored;
@@ -82,6 +90,8 @@ async function runAgentLayer(repeats: number) {
 const args = process.argv.slice(2);
 const layer = args.includes("--layer") ? args[args.indexOf("--layer") + 1] : "executor";
 const repeats = args.includes("--repeats") ? Number(args[args.indexOf("--repeats") + 1]) : 3;
+// --case A5,A8 limits agent evals to some cases (saves API quota while iterating).
+const only = args.includes("--case") ? args[args.indexOf("--case") + 1].split(",") : [];
 
 (layer === "agent" ? runAgentLayer(repeats) : runExecutorLayer()).catch((error) => {
   console.error(error);

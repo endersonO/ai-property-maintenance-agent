@@ -4,6 +4,7 @@ import { Category, Hazard } from "@/domain/enums";
 import { evaluatePolicy, type PolicyDecision } from "@/domain/policy";
 import { defineTool, type ToolContext } from "@/runtime/types";
 import type { AppDeps } from "../deps";
+import { authorizeTicketOwnership } from "../shared";
 
 // Tool schemas are strict: arguments the model invents (e.g. `priority`) are rejected.
 // Optional fields are nullable rather than omitted, as provider strict modes require.
@@ -124,14 +125,7 @@ export const requestHumanReview = defineTool<AppDeps, RequestReviewInput>({
     "Ask a person at the letting agency to review the case when you are unsure what to do. " +
     "Emergencies are already sent to review automatically.",
   input: RequestReviewInput,
-  authorize: async (ctx, args) => {
-    if (args.ticket_id === null) return null;
-    const ticket = await ctx.deps.repo.getTicket(args.ticket_id);
-    // Same answer for "missing" and "not yours": don't reveal other tenants' tickets.
-    return ticket?.tenantId === ctx.tenantId
-      ? null
-      : { code: "ticket_not_found", message: "No such ticket for this tenant." };
-  },
+  authorize: async (ctx, args) => (args.ticket_id === null ? null : authorizeTicketOwnership(ctx, args.ticket_id)),
   execute: async (ctx, args) => {
     const { agency } = await tenantContext(ctx);
     const review = await ctx.deps.repo.createReview({

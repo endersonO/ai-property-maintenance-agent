@@ -75,8 +75,12 @@ export function repositoryContract(
     it("keeps separate requests as separate tickets", async () => {
       const { repo, runId } = await setup();
       await repo.createTicketWithReview(ticket(runId, { idempotencyKey: "key-1" }), null);
-      await repo.createTicketWithReview(ticket(runId, { idempotencyKey: "key-2" }), null);
-      expect(await repo.listTickets("tenant_olivia")).toHaveLength(2);
+      await repo.createTicketWithReview(
+        ticket(runId, { idempotencyKey: "key-2", category: "appliance", hazards: [] }),
+        null,
+      );
+      const tickets = await repo.listTickets("tenant_olivia");
+      expect(tickets.map((t) => t.hazards).sort()).toEqual([[], ["active_water_leak"]]);
     });
 
     it("creates a review without a ticket", async () => {
@@ -93,9 +97,10 @@ export function repositoryContract(
       expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
     });
 
-    it("returns null for an unknown ticket", async () => {
+    it("returns null for an unknown or malformed ticket id", async () => {
       const { repo } = await setup();
       expect(await repo.getTicket("00000000-0000-0000-0000-000000000000")).toBeNull();
+      expect(await repo.getTicket("not-a-uuid")).toBeNull();
     });
   });
 }

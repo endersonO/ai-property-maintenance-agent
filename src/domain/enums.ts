@@ -28,6 +28,3 @@ export type Priority = z.infer<typeof Priority>;
 
 export const TicketStatus = z.enum(["open", "in_progress", "resolved", "cancelled"]);
 export type TicketStatus = z.infer<typeof TicketStatus>;
-
-export const ExecutorStage = z.enum(["validate", "authorize", "policy", "idempotency", "execute"]);
-export type ExecutorStage = z.infer<typeof ExecutorStage>;

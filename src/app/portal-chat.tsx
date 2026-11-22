@@ -13,6 +13,13 @@ const MODES = {
 } as const;
 type Mode = keyof typeof MODES;
 
+type Unconfirmed = {
+  requestId: string;
+  message: string;
+  workflow: Mode;
+  history: { role: "user" | "assistant"; content: string }[];
+};
+
 export function PortalChat({
   tenantId,
   tenantName,
@@ -39,25 +46,24 @@ export function PortalChat({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [turns, pending]);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const message = draft.trim();
-    if (!message || pending) return;
+  // A request whose outcome is unknown (network failure). Retrying reuses its requestId, so
+  // the server's idempotency key deduplicates it if the first attempt did reach the server.
+  const [unconfirmed, setUnconfirmed] = useState<Unconfirmed | null>(null);
 
-    // The server keeps no conversation: send prior text turns, excluding failed replies.
-    const history = turns
-      .filter((t) => !t.failed)
-      .map(({ role, content }) => ({ role, content }))
-      .slice(-20);
-    setTurns((t) => [...t, { role: "user", content: message }]);
-    setDraft("");
+  async function send(request: Unconfirmed) {
     setPending(true);
-
+    setUnconfirmed(null);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json", ...(accessCode && { "x-demo-access-code": accessCode }) },
-        body: JSON.stringify({ tenantId, workflow: mode, requestId: crypto.randomUUID(), message, history }),
+        body: JSON.stringify({
+          tenantId,
+          workflow: request.workflow,
+          requestId: request.requestId,
+          message: request.message,
+          history: request.history,
+        }),
       });
       if (res.status === 429) {
         const { retryAfterSeconds } = await res.json();
@@ -65,7 +71,7 @@ export function PortalChat({
           ...t,
           {
             role: "assistant",
-            content: `You're sending messages quickly. Please wait ${retryAfterSeconds} seconds and try again. Nothing was sent.`,
+            content: `You're sending messages quickly. Please wait ${retryAfterSeconds ?? 60} seconds and try again. Nothing was sent.`,
             failed: true,
           },
         ]);
@@ -87,22 +93,43 @@ export function PortalChat({
       ]);
       setTickets(body.tickets);
     } catch {
+      // We don't know whether the server received it: don't claim nothing happened.
+      setUnconfirmed(request);
       setTurns((t) => [
         ...t,
-        { role: "assistant", content: "I couldn't reach the service, so nothing was sent. Please try again.", failed: true },
+        {
+          role: "assistant",
+          content: "I couldn't confirm whether your message arrived. Use Retry to send it again — it won't create a duplicate.",
+          failed: true,
+        },
       ]);
     } finally {
       setPending(false);
     }
   }
 
-  // Enter sends, Shift+Enter adds a line. Never submit while an IME is composing text.
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const message = draft.trim();
+    if (!message || pending) return;
+
+    // The server keeps no conversation: send prior text turns, excluding failed replies.
+    const history = turns
+      .filter((t) => !t.failed)
+      .map(({ role, content }) => ({ role, content }))
+      .slice(-20);
+    setTurns((t) => [...t, { role: "user", content: message }]);
+    setDraft("");
+    await send({ requestId: crypto.randomUUID(), message, workflow: mode, history });
+  }
+
+  // Enter sends, Shift+Enter adds a line. While an IME is composing, Enter belongs to the IME:
+  // leave the event untouched and only cancel Enter when we actually submit.
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-      formRef.current?.requestSubmit();
-    }
+    if (event.key !== "Enter" || event.shiftKey) return;
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    event.preventDefault();
+    formRef.current?.requestSubmit();
   }
 
   return (
@@ -218,6 +245,15 @@ export function PortalChat({
               {pending ? "Sending…" : "Send"}
             </button>
           </div>
+          {unconfirmed && !pending && (
+            <button
+              type="button"
+              onClick={() => send(unconfirmed)}
+              className="mt-2 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-body hover:bg-subtle"
+            >
+              Retry
+            </button>
+          )}
           <p id="composer-hint" className="mt-2 text-label text-muted">
             Enter to send · Shift+Enter for a new line
           </p>

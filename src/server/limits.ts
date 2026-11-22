@@ -11,6 +11,12 @@ export class SlidingWindowLimiter {
     private readonly now: () => number = Date.now,
   ) {}
 
+  // True when the key has used its whole window, without recording a hit.
+  isBlocked(key: string): boolean {
+    const now = this.now();
+    return (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs).length >= this.max;
+  }
+
   take(key: string): { ok: true } | { ok: false; retryAfterMs: number } {
     const now = this.now();
     const recent = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);

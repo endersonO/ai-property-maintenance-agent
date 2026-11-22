@@ -17,6 +17,7 @@ function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinut
   const send = (body: Record<string, unknown>, accessCode: string | null = null) =>
     handleChat({ tenantId: "tenant_olivia", requestId: randomUUID(), message: "Water is leaking", ...body }, deps, {
       accessCode,
+      client: "test-client",
     });
   return { deps, send };
 }
@@ -65,6 +66,14 @@ describe("handleChat", () => {
     expect(res.body.outcome).toBe("failed");
     expect(res.body.reply).toMatch(/your request was recorded/);
     expect(res.body.tickets).toHaveLength(1);
+  });
+
+  it("says a person was asked when the run fails after creating a review without a ticket", async () => {
+    const { send } = setup([{ toolCalls: [{ name: "request_human_review", args: { reason: "Unsure", ticket_id: null } }] }]);
+    const res = await send({});
+
+    expect(res.status === 200 && res.body.outcome).toBe("failed");
+    expect(res.status === 200 && res.body.reply).toMatch(/asked a person at the agency/);
   });
 
   it("says nothing was changed when the run fails before any write", async () => {

@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import { PostgresRepository } from "@/infra/postgres-repository";
-import { accessGranted, withCode } from "@/server/access";
+import { headers } from "next/headers";
+import { clientKey } from "@/server/http";
+import { checkAccess, withCode } from "@/server/access";
 import { toTicketSummaries } from "@/server/chat";
 import { AccessForm } from "./access-form";
 import { PortalChat } from "./portal-chat";
@@ -10,7 +12,8 @@ type TenantOption = { id: string; name: string; agency: string };
 
 async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   const { tenant: requested, code } = await searchParams;
-  if (!accessGranted(code)) return <AccessForm />;
+  const access = checkAccess(code, clientKey(await headers()));
+  if (access !== "granted") return <AccessForm locked={access === "locked"} />;
   const sql = getSql();
   const tenants = await sql<TenantOption[]>`
     select t.id, t.name, a.name as agency

@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import { getRunDetail, type RunEventRow } from "@/infra/inspector-queries";
-import { accessGranted, withCode } from "@/server/access";
+import { headers } from "next/headers";
+import { clientKey } from "@/server/http";
+import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../../access-form";
 import { PriorityBadge } from "../../ui";
 import { fmtDate, fmtMs, JsonBlock, OutcomeBadge, PipelineStages } from "../components";
@@ -77,7 +79,8 @@ async function RunDetail({
   searchParams: PageProps<"/inspector/[runId]">["searchParams"];
 }) {
   const [{ runId }, { code }] = await Promise.all([params, searchParams]);
-  if (!accessGranted(code)) return <AccessForm />;
+  const access = checkAccess(code, clientKey(await headers()));
+  if (access !== "granted") return <AccessForm locked={access === "locked"} />;
   const detail = await getRunDetail(getSql(), runId);
   if (!detail) notFound();
   const { run, events, tickets, reviews } = detail;

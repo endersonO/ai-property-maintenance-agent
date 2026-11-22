@@ -103,10 +103,12 @@ export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
     check: async ({ result }) => {
       const e = expectations();
       const args = firstCreateArgs(result);
-      // Asking a clarifying question instead is acceptable; a ticket must not invent hazards.
+      // Either a ticket without invented hazards, or a clarifying question — not anything else.
       if (args) {
         e.equal("category", args.category, "heating");
         e.equal("hazards", args.hazards, []);
+      } else {
+        e.equal("asks a clarifying question", result.output?.includes("?"), true);
       }
       return e.failures;
     },

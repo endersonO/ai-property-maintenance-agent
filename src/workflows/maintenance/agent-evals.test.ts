@@ -40,6 +40,14 @@ describe("reply heuristics", () => {
 const caseById = (id: string) => maintenanceAgentEvals.find((c) => c.id === id)!;
 const makeDeps = () => ({ repo: new InMemoryRepository() });
 
+describe("A6 check", () => {
+  it("fails a reply that neither creates a ticket nor asks a question", async () => {
+    const offTopic = new ScriptedModel([{ text: "Boilers are fascinating machines." }]);
+    const outcome = await runAgentEval(maintenanceWorkflow, caseById("A6"), makeDeps, offTopic, 1);
+    expect(outcome.passes).toBe(0);
+  });
+});
+
 describe("A4 check", () => {
   it("fails a generic reply that never attempted to create the ticket", async () => {
     const lazy = new ScriptedModel([{ text: "Sorry, I can't help right now." }]);

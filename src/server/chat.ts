@@ -4,6 +4,7 @@ import type { ModelPort } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
 import type { TraceStore } from "@/runtime/tracing";
 import { workflowIds, workflows } from "@/workflows";
+import { checkAccess } from "./access";
 import type { SlidingWindowLimiter } from "./limits";
 
 // Chat use case behind POST /api/chat, kept free of Next.js so it can be tested directly.
@@ -28,8 +29,9 @@ export type ChatDeps = {
   model: ModelPort;
   // Deterministic abuse limits, checked before the model is called.
   limiter: SlidingWindowLimiter;
-  // When set (public demo), requests must present it.
+  // When set (public demo), requests must present it; failed attempts are limited per client.
   accessCode?: string;
+  accessLimiter?: SlidingWindowLimiter;
 };
 
 export type TicketSummary = {
@@ -48,6 +50,7 @@ export type TicketSummary = {
 export type ChatResponse =
   | { status: 400; body: { error: "invalid_request"; issues: string } }
   | { status: 401; body: { error: "access_code_required" } }
+  | { status: 429; body: { error: "too_many_attempts" } }
   | { status: 429; body: { error: "rate_limited"; retryAfterSeconds: number } }
   | { status: 404; body: { error: "unknown_tenant" } }
   | {
@@ -92,18 +95,20 @@ export function toTicketSummaries(tickets: Ticket[], reviews: Review[]): TicketS
 
 // When a run fails, never invent a reply — but don't claim nothing happened either:
 // the run may have created a ticket before failing (e.g. the final model call timed out).
-const FAILED_AFTER_WRITE =
+const FAILED_AFTER_TICKET =
   "I couldn't finish my reply, but your request was recorded. You can see it in your tickets below.";
+const FAILED_AFTER_REVIEW =
+  "I couldn't finish my reply, but I've asked a person at the agency to look at this.";
 const FAILED_NOTHING_WRITTEN = "Sorry, something went wrong and nothing was changed. Please try again.";
 
 export async function handleChat(
   input: unknown,
   deps: ChatDeps,
-  request: { accessCode: string | null } = { accessCode: null },
+  request: { accessCode: string | null; client: string } = { accessCode: null, client: "local" },
 ): Promise<ChatResponse> {
-  if (deps.accessCode && request.accessCode !== deps.accessCode) {
-    return { status: 401, body: { error: "access_code_required" } };
-  }
+  const access = checkAccess(request.accessCode, request.client, deps.accessCode, deps.accessLimiter);
+  if (access === "locked") return { status: 429, body: { error: "too_many_attempts" } };
+  if (access === "denied") return { status: 401, body: { error: "access_code_required" } };
   const parsed = ChatRequest.safeParse(input);
   if (!parsed.success) {
     return { status: 400, body: { error: "invalid_request", issues: z.prettifyError(parsed.error) } };
@@ -136,13 +141,17 @@ export async function handleChat(
   });
 
   const [tickets, reviews] = await Promise.all([deps.repo.listTickets(tenantId), deps.repo.listReviews(tenantId)]);
-  const wroteInThisRun = tickets.some((t) => t.runId === result.runId);
+  // A failed run may already have written something: say what was kept, never "nothing".
+  const ticketInThisRun = tickets.some((t) => t.runId === result.runId);
+  const reviewInThisRun = reviews.some((r) => r.runId === result.runId);
   const reply =
     result.status === "completed" && result.output
       ? result.output
-      : wroteInThisRun
-        ? FAILED_AFTER_WRITE
-        : FAILED_NOTHING_WRITTEN;
+      : ticketInThisRun
+        ? FAILED_AFTER_TICKET
+        : reviewInThisRun
+          ? FAILED_AFTER_REVIEW
+          : FAILED_NOTHING_WRITTEN;
 
   return {
     status: 200,

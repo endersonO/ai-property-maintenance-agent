@@ -20,6 +20,12 @@ const leakTicket = (tenantId: string, propertyId: string, key: string): NewTicke
   idempotencyKey: key,
 });
 
+// True when the reply describes the ticket as an emergency (or open) without negating it.
+export function statesOpenEmergency(reply: string): boolean {
+  const negated = /\b(not|isn't|is not|no longer)\s+(an?\s+)?(emergency|open)\b/i.test(reply);
+  return !negated && /\b(emergency|open)\b/i.test(reply);
+}
+
 const toolEvents = (result: RunResult) =>
   result.events.filter((e): e is Extract<RunEvent, { type: "tool_call" }> => e.type === "tool_call");
 
@@ -68,8 +74,9 @@ export const ticketStatusAgentEvals: AgentEvalCase<AppDeps>[] = [
     },
     check: async ({ result }) => {
       const e = expectations();
-      e.equal("called list_my_tickets", toolEvents(result).some((t) => t.toolName === "list_my_tickets"), true);
-      e.equal("reply mentions emergency or open", /emergency|open/i.test(result.output ?? ""), true);
+      const listed = toolEvents(result).find((t) => t.toolName === "list_my_tickets");
+      e.equal("list_my_tickets succeeded", listed?.status, "ok");
+      e.equal("reply states the open emergency", statesOpenEmergency(result.output ?? ""), true);
       return e.failures;
     },
   },

@@ -3,14 +3,17 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { getSql } from "@/infra/db";
 import { listRuns, runStats } from "@/infra/inspector-queries";
-import { accessGranted, withCode } from "@/server/access";
+import { headers } from "next/headers";
+import { clientKey } from "@/server/http";
+import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../access-form";
 import { fmtDate, fmtMs, OutcomeBadge } from "./components";
 
 async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["searchParams"] }) {
   await connection();
   const { code } = await searchParams;
-  if (!accessGranted(code)) return <AccessForm />;
+  const access = checkAccess(code, clientKey(await headers()));
+  if (access !== "granted") return <AccessForm locked={access === "locked"} />;
   const sql = getSql();
   const [runs, stats] = await Promise.all([listRuns(sql), runStats(sql)]);
 

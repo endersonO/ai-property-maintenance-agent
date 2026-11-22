@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { executeToolCall } from "./executor";
 import { toToolSpecs, type Message, type ModelPort, type ModelResponse, type Usage } from "./model";
+import { estimateCostUsd, redact, type RunMeta, type TraceStore } from "./tracing";
 import type { ExecutorStage, ToolResult, WorkflowDefinition } from "./types";
 
 // The agent loop: ask the model → run requested tools through the executor → feed results
@@ -54,10 +55,14 @@ export type RunInput<Deps> = {
   userMessage: string;
   maxSteps?: number;
   timeoutMs?: number;
+  // Optional persistence. Without it the run still returns its events in memory.
+  trace?: { store: TraceStore; meta: RunMeta };
+  // Upper bound for each trace write, so persistence can never hang the response.
+  traceTimeoutMs?: number;
 };
 
 export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> {
-  const { workflow, model, maxSteps = 6, timeoutMs = 60_000 } = input;
+  const { workflow, model, maxSteps = 6, timeoutMs = 60_000, traceTimeoutMs = 2_000 } = input;
   const runId = input.runId ?? randomUUID();
   const ctx = { runId, requestId: input.requestId, tenantId: input.tenantId, deps: input.deps };
   const tools = toToolSpecs(workflow.tools);
@@ -73,17 +78,59 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
   const usage: Usage = { inputTokens: 0, outputTokens: 0 };
   let steps = 0;
 
-  const finish = (status: RunResult["status"], output: string | null, error: string | null): RunResult => ({
-    runId,
-    status,
-    output,
-    error,
-    steps,
-    usage,
-    durationMs: Math.round(performance.now() - startedAt),
-    events,
-    messages,
-  });
+  const finish = async (
+    status: RunResult["status"],
+    output: string | null,
+    error: string | null,
+  ): Promise<RunResult> => {
+    const result: RunResult = {
+      runId,
+      status,
+      output,
+      error,
+      steps,
+      usage,
+      durationMs: Math.round(performance.now() - startedAt),
+      events,
+      messages,
+    };
+    try {
+      if (input.trace) await withDeadline(input.trace.store.finishRun({
+        runId,
+        status,
+        output: redact(output),
+        error,
+        steps,
+        usage,
+        costUsd: estimateCostUsd(model.id, usage),
+        durationMs: result.durationMs,
+        events: redact(events),
+      }), Date.now() + traceTimeoutMs);
+    } catch (traceError) {
+      // The tenant's outcome already happened (e.g. a ticket exists); losing the trace
+      // must not turn it into a failure. Surface it in logs instead.
+      console.error(`Failed to persist trace for run ${runId}`, traceError);
+    }
+    return result;
+  };
+
+  // The run row must exist before any tool writes a ticket that references it.
+  if (input.trace) {
+    try {
+      await withDeadline(input.trace.store.startRun({
+        ...input.trace.meta,
+        runId,
+        workflowId: workflow.id,
+        tenantId: input.tenantId,
+        requestId: input.requestId,
+        model: model.id,
+        input: redact({ userMessage: input.userMessage, historyLength: input.history?.length ?? 0 }),
+      }), Math.min(deadline, Date.now() + traceTimeoutMs));
+    } catch (traceError) {
+      console.error(`Failed to start trace for run ${runId}`, traceError);
+      return { runId, status: "failed", output: null, error: "trace_unavailable", steps, usage, durationMs: 0, events, messages };
+    }
+  }
 
   while (steps < maxSteps) {
     if (Date.now() >= deadline) return finish("failed", null, "timeout");

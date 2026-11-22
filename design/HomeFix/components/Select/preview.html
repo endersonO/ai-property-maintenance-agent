@@ -1,0 +1,19 @@
+<!-- @dsCard group="Forms" height=200 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>Select — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' }, h('div', { className: 'lo-grid-states', style: { gridTemplateColumns: 'repeat(3, 1fr)' } },
+  S('default', h(L.Select, { label: 'Signed in as (simulated)', options: ['Amara Okafor','Tom Reyes'] })),
+  S('hover', h(L.Select, { label: 'Signed in as (simulated)', forceState: 'hover', options: ['Amara Okafor'] })),
+  S('focus-visible', h(L.Select, { label: 'Signed in as (simulated)', forceState: 'focus', options: ['Amara Okafor'] })),
+  S('disabled', h(L.Select, { label: 'Signed in as (simulated)', disabled: true, options: ['Amara Okafor'] })),
+  S('pending', h(L.Select, { label: 'Signed in as (simulated)', pending: true, hint: 'Loading tenants…', options: ['Loading…'] })),
+  S('error', h(L.Select, { label: 'Signed in as (simulated)', error: 'Couldn’t load tenants. Try again.', options: ['—'] })))));
+</script>
+</body>
+</html>

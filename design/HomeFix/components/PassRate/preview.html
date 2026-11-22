@@ -1,0 +1,14 @@
+<!-- @dsCard group="Inspector" height=110 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>PassRate — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' },
+  h(L.PassRate, { passed: 3, total: 3 }), h(L.PassRate, { passed: 2, total: 3 }), h(L.PassRate, { passed: 2, total: 2, infra: 1 })));
+</script>
+</body>
+</html>

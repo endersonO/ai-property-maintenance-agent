@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Repository } from "@/domain/repository";
+import type { Repository, Review, Ticket } from "@/domain/repository";
 import type { ModelPort } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
 import type { TraceStore } from "@/runtime/tracing";
@@ -27,8 +27,12 @@ export type TicketSummary = {
   category: string;
   priority: string;
   status: string;
+  hazards: string[];
+  location: string | null;
   description: string;
   createdAt: string;
+  // Tenant-facing explanation when a person at the agency must review the ticket.
+  review: string | null;
 };
 
 export type ChatResponse =
@@ -36,8 +40,43 @@ export type ChatResponse =
   | { status: 404; body: { error: "unknown_tenant" } }
   | {
       status: 200;
-      body: { runId: string; outcome: "completed" | "failed"; reply: string; tickets: TicketSummary[] };
+      body: {
+        runId: string;
+        outcome: "completed" | "failed";
+        reply: string;
+        tickets: TicketSummary[];
+        // Tickets created by this message, so the portal can attach safety guidance.
+        createdTicketIds: string[];
+      };
     };
+
+// Review reasons are written for operators ("rule 0 (emergency) requires review");
+// tenants get a plain sentence instead.
+function tenantReviewReason(ticket: Ticket, review: Review): string {
+  if (review.source === "agent") return "The assistant asked a person at the agency to check this.";
+  if (ticket.priority === "emergency") return "Emergencies are always checked by a person at the agency.";
+  if (review.reason.includes("estimated cost")) {
+    return "A person at the agency will approve the repair before it is booked.";
+  }
+  return "A person at the agency will check this before it goes ahead.";
+}
+
+export function toTicketSummaries(tickets: Ticket[], reviews: Review[]): TicketSummary[] {
+  return tickets.map((t) => {
+    const review = reviews.find((r) => r.ticketId === t.id);
+    return {
+      id: t.id,
+      category: t.category,
+      priority: t.priority,
+      status: t.status,
+      hazards: t.hazards,
+      location: t.location,
+      description: t.description,
+      createdAt: t.createdAt.toISOString(),
+      review: review ? tenantReviewReason(t, review) : null,
+    };
+  });
+}
 
 // When a run fails, never invent a reply — but don't claim nothing happened either:
 // the run may have created a ticket before failing (e.g. the final model call timed out).
@@ -72,7 +111,7 @@ export async function handleChat(input: unknown, deps: ChatDeps): Promise<ChatRe
     trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id } },
   });
 
-  const tickets = await deps.repo.listTickets(tenantId);
+  const [tickets, reviews] = await Promise.all([deps.repo.listTickets(tenantId), deps.repo.listReviews(tenantId)]);
   const wroteInThisRun = tickets.some((t) => t.runId === result.runId);
   const reply =
     result.status === "completed" && result.output
@@ -87,14 +126,8 @@ export async function handleChat(input: unknown, deps: ChatDeps): Promise<ChatRe
       runId: result.runId,
       outcome: result.status,
       reply,
-      tickets: tickets.map((t) => ({
-        id: t.id,
-        category: t.category,
-        priority: t.priority,
-        status: t.status,
-        description: t.description,
-        createdAt: t.createdAt.toISOString(),
-      })),
+      tickets: toTicketSummaries(tickets, reviews),
+      createdTicketIds: tickets.filter((t) => t.runId === result.runId).map((t) => t.id),
     },
   };
 }

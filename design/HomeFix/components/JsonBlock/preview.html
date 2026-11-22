@@ -1,0 +1,13 @@
+<!-- @dsCard group="Inspector" height=200 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>JsonBlock — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage', style: { maxWidth: 520 } }, h(L.JsonBlock, { label: 'Result', value: L.fixtures.events[6].result })));
+</script>
+</body>
+</html>

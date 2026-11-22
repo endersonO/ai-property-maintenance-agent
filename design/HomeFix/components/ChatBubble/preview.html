@@ -1,0 +1,17 @@
+<!-- @dsCard group="Chat" height=420 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>ChatBubble — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-log', style: { maxWidth: 640 } },
+  h(L.ChatBubble, { role: 'tenant', time: '08:12' }, 'Water is dripping through my kitchen ceiling, right under the bathroom.'),
+  h(L.ChatBubble, { role: 'assistant', time: '08:12' }, 'Thanks for telling me straight away. Is the water near a light fitting or socket?'),
+  h(L.ChatBubble, { state: 'pending' }),
+  h(L.ChatBubble, { role: 'assistant', state: 'failed', time: '08:17' }, 'I couldn’t finish my reply, but your request was recorded as ticket LO-1042. You can send another message, or wait for the contractor’s call.')));
+</script>
+</body>
+</html>

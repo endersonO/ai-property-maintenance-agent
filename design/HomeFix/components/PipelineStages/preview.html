@@ -1,0 +1,16 @@
+<!-- @dsCard group="Inspector" height=150 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>PipelineStages — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' },
+  S('ok — all stages passed', h(L.PipelineStages, { status: 'ok' })),
+  S('rejected at authorize', h(L.PipelineStages, { status: 'rejected', stoppedAt: 'authorize' })),
+  S('error at execute', h(L.PipelineStages, { status: 'error', stoppedAt: 'execute' }))));
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!-- @dsCard group="Actions" height=170 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>Button — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' },
+  ['primary','secondary'].map(function (v) { return h('div', { key: v, className: 'lo-grid-states', style: { gridTemplateColumns: 'repeat(6, auto)', justifyContent: 'start', gap: '16px 20px' } },
+    S(v + ' · default', h(L.Button, { variant: v }, v === 'primary' ? 'Send' : 'Switch tenant')),
+    S('hover', h(L.Button, { variant: v, forceState: 'hover' }, v === 'primary' ? 'Send' : 'Switch tenant')),
+    S('focus-visible', h(L.Button, { variant: v, forceState: 'focus' }, v === 'primary' ? 'Send' : 'Switch tenant')),
+    S('disabled', h(L.Button, { variant: v, disabled: true }, v === 'primary' ? 'Send' : 'Switch tenant')),
+    S('pending', h(L.Button, { variant: v, pending: true, pendingLabel: v === 'primary' ? 'Sending…' : 'Switching…' }, 'x')),
+    S('error', h(L.Button, { variant: v, forceState: 'error', icon: 'alertFill' }, 'Retry')));
+  })));
+</script>
+</body>
+</html>

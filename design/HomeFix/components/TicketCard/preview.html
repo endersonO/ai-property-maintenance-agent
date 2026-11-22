@@ -1,0 +1,13 @@
+<!-- @dsCard group="Tickets" height=560 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>TicketCard — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('ul', { className: 'lo-tickets', style: { maxWidth: 440 } }, L.fixtures.tickets.map(function (t) { return h(L.TicketCard, { key: t.id, ticket: t }); })));
+</script>
+</body>
+</html>

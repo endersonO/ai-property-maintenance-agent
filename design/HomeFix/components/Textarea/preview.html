@@ -1,0 +1,19 @@
+<!-- @dsCard group="Forms" height=230 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>Textarea — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' }, h('div', { className: 'lo-grid-states', style: { gridTemplateColumns: 'repeat(3, 1fr)' } },
+  S('default', h(L.Textarea, { label: 'Message', placeholder: 'Describe the problem…' })),
+  S('hover', h(L.Textarea, { label: 'Message', forceState: 'hover', placeholder: 'Describe the problem…' })),
+  S('focus-visible', h(L.Textarea, { label: 'Message', forceState: 'focus', defaultValue: 'Water coming through the ceiling' })),
+  S('disabled', h(L.Textarea, { label: 'Message', disabled: true, placeholder: 'Chat unavailable' })),
+  S('pending', h(L.Textarea, { label: 'Message', pending: true, defaultValue: 'Water coming through the ceiling' })),
+  S('error', h(L.Textarea, { label: 'Message', error: 'Message is too long (max 2,000 characters).', defaultValue: '…' })))));
+</script>
+</body>
+</html>

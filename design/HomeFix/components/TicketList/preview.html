@@ -1,0 +1,13 @@
+<!-- @dsCard group="Tickets" height=200 subtitle="Empty state" -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>TicketList — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-panel', style: { margin: 16, maxWidth: 440 } }, h(L.TicketList, { tickets: [] })));
+</script>
+</body>
+</html>

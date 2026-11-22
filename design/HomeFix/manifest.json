@@ -1,0 +1,171 @@
+{
+  "manifestVersion": 3,
+  "name": "HomeFix",
+  "namespace": "HomeFix",
+  "files": [
+    "components/AgentInspector/README.md",
+    "components/Button/README.md",
+    "components/ChatBubble/README.md",
+    "components/ChatLog/README.md",
+    "components/Composer/README.md",
+    "components/EmergencyNotice/README.md",
+    "components/EvalsReport/README.md",
+    "components/Icon/README.md",
+    "components/JsonBlock/README.md",
+    "components/OutcomeBadge/README.md",
+    "components/PassRate/README.md",
+    "components/PipelineStages/README.md",
+    "components/PriorityBadge/README.md",
+    "components/ReviewBadge/README.md",
+    "components/RunsTable/README.md",
+    "components/Select/README.md",
+    "components/TenantPortal/README.md",
+    "components/TenantPortalMobile/README.md",
+    "components/TenantSwitcher/README.md",
+    "components/Textarea/README.md",
+    "components/TicketCard/README.md",
+    "components/TicketList/README.md",
+    "components/TicketStatus/README.md",
+    "components/TimelineEvent/README.md",
+    "components/bundle.css",
+    "components/bundle.js",
+    "components/index.d.ts",
+    "implementation.md",
+    "tokens.css"
+  ],
+  "libraries": [
+    {
+      "name": "react",
+      "version": "18",
+      "global": "React"
+    },
+    {
+      "name": "react-dom",
+      "version": "18",
+      "global": "ReactDOM"
+    }
+  ],
+  "components": [
+    {
+      "name": "Button",
+      "group": "Actions",
+      "summary": "Triggers an action."
+    },
+    {
+      "name": "Select",
+      "group": "Forms",
+      "summary": "Native with a visible label, styled with border-strong on surface."
+    },
+    {
+      "name": "Textarea",
+      "group": "Forms",
+      "summary": "Multi-line input."
+    },
+    {
+      "name": "PriorityBadge",
+      "group": "Status",
+      "summary": "Ticket priority, as decided by policy (never by the model)."
+    },
+    {
+      "name": "OutcomeBadge",
+      "group": "Status",
+      "summary": "Outcome of a tool call (ok | rejected | error) or a run (completed | failed)."
+    },
+    {
+      "name": "ReviewBadge",
+      "group": "Status",
+      "summary": "Marks a ticket or run that was sent to a person at the agency. review on review-soft, person icon."
+    },
+    {
+      "name": "TicketStatus",
+      "group": "Status",
+      "summary": "Lifecycle of a ticket: open | in_progress | resolved | cancelled."
+    },
+    {
+      "name": "ChatBubble",
+      "group": "Chat",
+      "summary": "One message in the conversation."
+    },
+    {
+      "name": "ChatLog",
+      "group": "Chat",
+      "summary": "The conversation container: role=\"log\", aria-live=\"polite\", auto-scrolls to the latest message."
+    },
+    {
+      "name": "EmergencyNotice",
+      "group": "Chat",
+      "summary": "Safety guidance attached under the assistant reply that confirms an emergency."
+    },
+    {
+      "name": "Composer",
+      "group": "Chat",
+      "summary": "Message input."
+    },
+    {
+      "name": "TicketCard",
+      "group": "Tickets",
+      "summary": "One ticket in \"Your tickets\"."
+    },
+    {
+      "name": "TicketList",
+      "group": "Tickets",
+      "summary": "List of TicketCards with aria-label=\"Your tickets\"."
+    },
+    {
+      "name": "TenantSwitcher",
+      "group": "Tickets",
+      "summary": "Simulated sign-in for the prototype: \"Signed in as (simulated)\" select + secondary \"Switch tenant\" button."
+    },
+    {
+      "name": "PipelineStages",
+      "group": "Inspector",
+      "summary": "Where a tool call stopped in the executor: validate → authorize → policy → idempotency → execute."
+    },
+    {
+      "name": "JsonBlock",
+      "group": "Inspector",
+      "summary": "Readable, syntax-tinted JSON (2-space indent) in mono on subtle."
+    },
+    {
+      "name": "TimelineEvent",
+      "group": "Inspector",
+      "summary": "One event in a run's vertical timeline, as a disclosure ( )."
+    },
+    {
+      "name": "RunsTable",
+      "group": "Inspector",
+      "summary": "Dense list of agent runs: time, workflow, tenant, agency, status, steps, duration, tokens, cost (£, 4 dp), source (portal / eval)."
+    },
+    {
+      "name": "PassRate",
+      "group": "Inspector",
+      "summary": "Eval case result: one pip per scored run, n/m, and infra errors as dashed empty pips outside the score (\"+ 1 infra error, not scored\")."
+    },
+    {
+      "name": "Icon",
+      "group": "Foundations",
+      "summary": "Inline SVG icons on a 24px grid, 1.75 stroke, round caps, currentColor, always aria-hidden (the adjacent word carries meaning)."
+    },
+    {
+      "name": "AgentInspector",
+      "group": "Screens",
+      "summary": "Agent Inspector: runs table above; selected run run_7f3a2c below with its timeline."
+    },
+    {
+      "name": "EvalsReport",
+      "group": "Screens",
+      "summary": "Evals report: per-case pass rate over 3 runs, infra errors shown separately and not scored, and an expandable expected-vs-actual trace for the failing case."
+    },
+    {
+      "name": "TenantPortal",
+      "group": "Screens",
+      "summary": "Tenant Portal, desktop."
+    },
+    {
+      "name": "TenantPortalMobile",
+      "group": "Screens",
+      "summary": "Tenant Portal at mobile width: same composition stacked (chat first, then tickets) via a container query at 880px."
+    }
+  ],
+  "assetGroups": []
+}

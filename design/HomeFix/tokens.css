@@ -1,0 +1,155 @@
+/* HomeFix — generated from tokens.json */
+:root, [data-theme="light"] {
+  --background: #f6f7f5; /* Page canvas behind panels. Maps to --background. */
+  --surface: #ffffff; /* Panels, cards, inputs, assistant bubbles. Maps to --surface. */
+  --subtle: #eef1ef; /* Recessed fills: table header, JSON blocks, hover on rows, tenant chips. */
+  --foreground: #17201d; /* Primary text on background, surface and subtle. Maps to --foreground. */
+  --muted: #56625e; /* Secondary text (meta, dates, hints) on background, surface and subtle. Maps to --muted. */
+  --border: #dce1de; /* Hairline dividers and panel outlines (decorative, not the only cue). Maps to --border. */
+  --border-strong: #7f8b87; /* Control borders (inputs, selects, secondary buttons): 3:1 on surface and background. */
+  --accent: #0d6a5b; /* Primary action fill, links, focus ring, tenant bubble. Maps to --accent. */
+  --accent-hover: #0a5649; /* Primary button hover / pressed fill. */
+  --accent-text: #ffffff; /* Text and icons on an accent fill (primary button, tenant bubble). Maps to --accent-text. */
+  --accent-soft: #e3f2ee; /* Selected row, active nav, quiet accent backgrounds; foreground text reads on it. */
+  --priority-emergency: #b3261e; /* Emergency priority: badge text/icon on priority-emergency-soft, and the emergency ticket edge. Never decorative. */
+  --priority-emergency-soft: #fdeceb; /* Emergency badge background and emergency notice panel. */
+  --priority-high: #a14a00; /* High priority: badge text/icon on priority-high-soft. */
+  --priority-high-soft: #fdf0e2; /* High priority badge background. */
+  --priority-normal: #2b5c8a; /* Normal priority: badge text/icon on priority-normal-soft. */
+  --priority-normal-soft: #e7eff8; /* Normal priority badge background. */
+  --priority-low: #55615d; /* Low priority: badge text/icon on priority-low-soft. */
+  --priority-low-soft: #edf0ee; /* Low priority badge background. */
+  --status-ok: #1c6f38; /* Step/run OK, ticket resolved: text/icon on status-ok-soft, surface and background. */
+  --status-ok-soft: #e5f4e9; /* OK badge background. */
+  --status-rejected: #7a5a00; /* Rejected — the system correctly said no (a guardrail held). Text/icon on status-rejected-soft; always paired with the shield icon and a dashed outline. */
+  --status-rejected-soft: #fbf3dc; /* Rejected badge and rejected timeline card background. */
+  --status-error: #b3261e; /* Error — something broke. Text/icon on status-error-soft; always paired with the filled alert icon and a solid outline. */
+  --status-error-soft: #fdeceb; /* Error badge and error timeline card background. */
+  --review: #7b3f98; /* Human review: badge text/icon on review-soft and the review marker on tickets. */
+  --review-soft: #f5ebfa; /* Human review badge background. */
+  --shadow-sm: 0 1px 2px rgba(16,24,22,0.06); /* Panels on background. The only resting shadow. */
+  --shadow-md: 0 4px 16px rgba(16,24,22,0.10); /* Floating layers only: select menus, toasts. */
+}
+[data-theme="dark"] {
+  --background: #0f1211;
+  --surface: #181c1b;
+  --subtle: #212624;
+  --foreground: #e7ecea;
+  --muted: #9ba7a3;
+  --border: #2c3330;
+  --border-strong: #6a7672;
+  --accent: #5ec6b0;
+  --accent-hover: #7dd5c2;
+  --accent-text: #06231d;
+  --accent-soft: #16302b;
+  --priority-emergency: #ff8f80;
+  --priority-emergency-soft: #3b1916;
+  --priority-high: #f3a65e;
+  --priority-high-soft: #352410;
+  --priority-normal: #8fbbe8;
+  --priority-normal-soft: #18263a;
+  --priority-low: #a3aeaa;
+  --priority-low-soft: #242a28;
+  --status-ok: #6fd08e;
+  --status-ok-soft: #16301f;
+  --status-rejected: #e2bb55;
+  --status-rejected-soft: #2f2710;
+  --status-error: #ff8f80;
+  --status-error-soft: #3b1916;
+  --review: #d6a9ee;
+  --review-soft: #2e1d37;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md: 0 6px 20px rgba(0,0,0,0.55);
+}
+:root {
+  --space-1: 4px; /* Icon-to-label gap, badge vertical padding. */
+  --space-2: 8px; /* Badge horizontal padding, gaps in meta rows. */
+  --space-3: 12px; /* Control padding (x), bubble padding (y), table cell padding. */
+  --space-4: 16px; /* Card and bubble padding, gap between stacked fields. */
+  --space-5: 20px; /* Panel padding on mobile. */
+  --space-6: 24px; /* Panel padding on desktop, gap between panels. */
+  --space-8: 32px; /* Section separation, empty-state padding. */
+  --space-12: 48px; /* Page gutters on wide screens. */
+  --radius-sm: 4px; /* Badges, JSON blocks, pipeline chips. */
+  --radius-md: 6px; /* Buttons, inputs, selects. */
+  --radius-lg: 10px; /* Panels, ticket cards, timeline cards. */
+  --radius-xl: 16px; /* Chat bubbles (with one 4px corner toward the speaker). */
+  --radius-full: 9999px; /* Status dots, avatars, spinner. */
+  --border-hairline: 1px; /* All dividers and control borders. */
+  --border-focus: 2px; /* Focus ring width (offset 2px). */
+  --border-edge: 3px; /* Emergency ticket top edge and selected timeline event rail. */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-title-lg: 600 24px/32px var(--font-sans); /* Screen titles (portal header, inspector run title). */
+  --text-title: 600 18px/26px var(--font-sans); /* Panel titles. */
+  --text-heading: 600 15px/22px var(--font-sans); /* Ticket titles, timeline event names, table group headers. */
+  --text-body-lg: 400 16px/24px var(--font-sans); /* Tenant chat bubbles and tenant-facing notices. Never smaller than this for tenant messages. */
+  --text-body: 400 14px/20px var(--font-sans); /* Default UI text, ticket descriptions, form labels. */
+  --text-body-sm: 400 13px/18px var(--font-sans); /* Meta lines, hints, inspector table cells. */
+  --text-label: 500 12px/16px var(--font-sans); /* Badges, column headers, pipeline stage labels. */
+  --text-mono: 400 13px/20px var(--font-mono); /* JSON blocks, IDs, tool names. */
+  --text-mono-sm: 400 12px/16px var(--font-mono); /* Numeric cells: tokens, duration, cost. Use tabular figures. */
+}
+.title-lg {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.title {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.heading {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.body-lg {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.body-sm {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.mono-sm {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+}

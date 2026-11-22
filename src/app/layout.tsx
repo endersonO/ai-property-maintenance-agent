@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -17,10 +17,13 @@ export const metadata: Metadata = {
   description: "AI-assisted maintenance for UK lettings",
 };
 
+// Declared in <head> so the browser themes the canvas and native controls before CSS loads.
+export const viewport: Viewport = { colorScheme: "light dark" };
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
+      lang="en-GB"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>

@@ -35,3 +35,6 @@ npm-debug.log*
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Design-system export archive (extracted into design/)
+HomeFix.zip

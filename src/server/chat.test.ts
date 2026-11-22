@@ -37,6 +37,8 @@ describe("handleChat", () => {
     if (res.status !== 200) return;
     expect(res.body).toMatchObject({ outcome: "completed", reply: "Emergency ticket created." });
     expect(res.body.tickets.map((t) => t.priority)).toEqual(["emergency"]);
+    expect(res.body.tickets[0].review).toBe("Emergencies are always checked by a person at the agency.");
+    expect(res.body.createdTicketIds).toEqual([res.body.tickets[0].id]);
     expect(deps.traces.runs.get(res.body.runId)).toMatchObject({
       source: "portal",
       agencyId: "agency_northbridge",

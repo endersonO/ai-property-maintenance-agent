@@ -1,0 +1,13 @@
+<!-- @dsCard group="Inspector" height=230 width=1100 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>RunsTable — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-panel', style: { margin: 16 } }, h(L.RunsTable, { runs: L.fixtures.runs, selectedId: 'run_7f3a2c' })));
+</script>
+</body>
+</html>

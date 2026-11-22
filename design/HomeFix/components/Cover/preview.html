@@ -1,0 +1,63 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>HomeFix</title>
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--background); color:var(--foreground); font-family:var(--font-sans); overflow:hidden; }
+  .cover { position:relative; height:288px; overflow:hidden; }
+  .art { position:absolute; top:0; left:480px; width:480px; height:288px; overflow:hidden; }
+  .art svg { display:block; width:480px; height:288px; }
+  .accent { fill:var(--accent); }
+  .soft { fill:var(--accent-soft); }
+  .ink { fill:var(--foreground); }
+  .subtle { fill:var(--subtle); }
+  .emer { fill:var(--priority-emergency); }
+  .review { fill:var(--review); }
+  .rej { fill:none; stroke:var(--status-rejected); stroke-width:2; stroke-dasharray:6 4; }
+  .chip { fill:var(--accent-text); }
+  .chip.on-soft { fill:var(--accent); }
+  .words { position:absolute; left:var(--space-6); bottom:var(--space-6); max-width:440px; }
+  .name { margin:0; font-size:64px; line-height:.95; font-weight:600; letter-spacing:-.02em; color:var(--foreground); }
+  .tag { margin:var(--space-2) 0 0 2px; font-size:14px; line-height:20px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      accent 224×240 slab bled off the top (identity) · accent-soft 184×112 · foreground 184×112 bled off the right · subtle strip 400×24 · emergency 48×24 and review 24×24 kept small (states only) — ≈38% of 960×288
+  arrangement one tall accent slab with satellites; bottoms on one line space-6 above the edge; space-4 gutters
+  pattern     tiles cut by radius-sm: the executor pipeline (validate → authorize → policy → idempotency → execute) as five chips repeated down the slab, one stage per row stopped with a dashed rejected outline — "the AI only proposes; deterministic software decides"
+  scales      sides in space-2 multiples; gutters space-4; chip 32×16 at space-2 gaps; corners radius-lg on blocks, radius-sm on chips
+-->
+<rect class="accent" x="16" y="-16" width="224" height="280" rx="10"/>
+<rect class="soft" x="256" y="40" width="184" height="104" rx="10"/>
+<rect class="ink" x="256" y="160" width="240" height="104" rx="10"/>
+<rect class="emer" x="456" y="40" width="48" height="24" rx="4"/>
+<rect class="review" x="456" y="80" width="24" height="24" rx="4"/>
+<!-- pipeline chips on the slab: 5 per row, 32 wide, 8 gap -->
+<g>
+<rect class="chip" x="32" y="40"  width="32" height="16" rx="4"/><rect class="chip" x="72" y="40" width="32" height="16" rx="4"/><rect class="chip" x="112" y="40" width="32" height="16" rx="4"/><rect class="chip" x="152" y="40" width="32" height="16" rx="4"/><rect class="chip" x="192" y="40" width="32" height="16" rx="4"/>
+<rect class="chip" x="32" y="72"  width="32" height="16" rx="4"/><rect class="chip" x="72" y="72" width="32" height="16" rx="4"/><rect class="chip" x="112" y="72" width="32" height="16" rx="4"/><rect class="chip" x="152" y="72" width="32" height="16" rx="4"/>
+<rect class="chip" x="32" y="104" width="32" height="16" rx="4"/><rect class="chip" x="72" y="104" width="32" height="16" rx="4"/>
+<rect class="chip" x="32" y="136" width="32" height="16" rx="4"/><rect class="chip" x="72" y="136" width="32" height="16" rx="4"/><rect class="chip" x="112" y="136" width="32" height="16" rx="4"/><rect class="chip" x="152" y="136" width="32" height="16" rx="4"/><rect class="chip" x="192" y="136" width="32" height="16" rx="4"/>
+<rect class="chip" x="32" y="168" width="32" height="16" rx="4"/><rect class="chip" x="72" y="168" width="32" height="16" rx="4"/><rect class="chip" x="112" y="168" width="32" height="16" rx="4"/><rect class="chip" x="152" y="168" width="32" height="16" rx="4"/><rect class="chip" x="192" y="168" width="32" height="16" rx="4"/>
+</g>
+<g>
+<rect class="chip on-soft" x="272" y="56" width="32" height="16" rx="4"/><rect class="chip on-soft" x="312" y="56" width="32" height="16" rx="4"/><rect class="chip on-soft" x="352" y="56" width="32" height="16" rx="4"/><rect class="chip on-soft" x="392" y="56" width="32" height="16" rx="4"/>
+<rect class="chip on-soft" x="272" y="88" width="32" height="16" rx="4"/>
+<rect class="rej" x="312" y="88" width="32" height="16" rx="4"/>
+</g>
+</svg>
+</div>
+<div class="words">
+<h1 class="name">HomeFix</h1>
+<p class="tag">Calm for tenants. Precise for operators.</p>
+</div>
+</div>
+</body>
+</html>

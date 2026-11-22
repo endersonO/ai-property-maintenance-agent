@@ -1,0 +1,14 @@
+<!-- @dsCard group="Foundations" height=80 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>Icon — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'lo-stage' }, h('div', { className: 'lo-row', style: { gap: 20 } },
+  ['alert','alertFill','shield','person','check','x','clock','tool','cpu','chevron','send','home'].map(function (n) { return h('span', { key: n, style: { display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 4 } }, h(L.Icon, { name: n }), h('span', { className: 'lo-cap' }, n)); }))));
+</script>
+</body>
+</html>

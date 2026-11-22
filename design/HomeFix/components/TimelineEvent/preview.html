@@ -1,0 +1,17 @@
+<!-- @dsCard group="Inspector" height=620 -->
+<!doctype html>
+<html lang="en-GB">
+<head><meta charset="utf-8"><title>TimelineEvent — preview</title></head>
+<body>
+<div id="root"></div>
+<script>
+var L = window.HomeFix, h = React.createElement, F = React.Fragment;
+function S(label, el) { return h('div', null, el, h('span', { className: 'lo-cap' }, label)); }
+ReactDOM.createRoot(document.getElementById('root')).render(h('ol', { className: 'lo-timeline', style: { padding: 16 } },
+  h(L.TimelineEvent, { event: L.fixtures.events[3], defaultOpen: true }),
+  h(L.TimelineEvent, { event: L.fixtures.events[4] }),
+  h(L.TimelineEvent, { event: L.fixtures.errorEvent }),
+  h(L.TimelineEvent, { event: L.fixtures.events[1], defaultOpen: false })));
+</script>
+</body>
+</html>

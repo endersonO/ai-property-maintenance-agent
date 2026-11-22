@@ -139,7 +139,12 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
     const modelStartedAt = performance.now();
     let response: ModelResponse;
     try {
-      response = await withDeadline(model.next({ messages, tools }), deadline);
+      const controller = new AbortController();
+      response = await withDeadline(
+        model.next({ messages, tools, signal: controller.signal }),
+        deadline,
+        () => controller.abort(),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       events.push({
@@ -166,7 +171,12 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
     });
     messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
 
-    if (response.toolCalls.length === 0) return finish("completed", response.text, null);
+    if (response.toolCalls.length === 0) {
+      // A final answer with no text is not an answer.
+      return response.text?.trim()
+        ? finish("completed", response.text, null)
+        : finish("failed", null, "empty_response");
+    }
 
     for (const call of response.toolCalls) {
       const outcome = await executeToolCall(workflow.tools, call, ctx);
@@ -193,10 +203,13 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
   return finish("failed", null, "max_steps_exceeded");
 }
 
-function withDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
+function withDeadline<T>(promise: Promise<T>, deadline: number, onTimeout?: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("timeout")), Math.max(0, deadline - Date.now()));
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error("timeout"));
+    }, Math.max(0, deadline - Date.now()));
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

@@ -54,6 +54,24 @@ describe("runAgent", () => {
     expect(result.events[0]).toMatchObject({ type: "model_call", status: "error" });
   });
 
+  it("fails on an empty final answer instead of completing with nothing", async () => {
+    const result = await run(new ScriptedModel([{ text: "   " }]));
+    expect(result).toMatchObject({ status: "failed", output: null, error: "empty_response" });
+  });
+
+  it("aborts the in-flight model call when the deadline passes", async () => {
+    let signal: AbortSignal | undefined;
+    const slow: ModelPort = {
+      id: "slow",
+      next: (input) => {
+        signal = input.signal;
+        return new Promise(() => {});
+      },
+    };
+    await run(slow, { timeoutMs: 20 });
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("fails when the model exceeds the deadline", async () => {
     const slow: ModelPort = {
       id: "slow",

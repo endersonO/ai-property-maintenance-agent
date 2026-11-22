@@ -1,4 +1,4 @@
-import { ScriptedModel, type ScriptStep } from "./model";
+import { ScriptedModel, type ModelPort, type ScriptStep } from "./model";
 import { runAgent, type RunResult } from "./orchestrator";
 import { InMemoryTraceStore } from "./tracing";
 import type { WorkflowDefinition } from "./types";
@@ -78,4 +78,57 @@ export function expectations() {
       }
     },
   };
+}
+
+// Agent evals: the real model decides. Each case runs several times because the model is
+// non-deterministic; the result is a pass rate, reported but not gating CI.
+
+export type AgentEvalCase<Deps> = {
+  id: string;
+  title: string;
+  tenantId: string;
+  userMessage: string;
+  setup?: (deps: Deps) => void | Promise<void>;
+  check: (input: { deps: Deps; result: RunResult }) => Promise<string[]>;
+};
+
+export type AgentEvalOutcome = {
+  id: string;
+  title: string;
+  passes: number;
+  // Infrastructure errors (quota, network, timeout) say nothing about the model's decisions:
+  // they are reported separately and excluded from the pass rate.
+  attempts: { pass: boolean; infraError: boolean; failures: string[]; result: RunResult }[];
+};
+
+const INFRA_ERRORS = new Set(["model_error", "timeout", "trace_unavailable"]);
+
+export async function runAgentEval<Deps>(
+  workflow: WorkflowDefinition<Deps>,
+  evalCase: AgentEvalCase<Deps>,
+  makeDeps: () => Deps,
+  model: ModelPort,
+  repeats = 3,
+): Promise<AgentEvalOutcome> {
+  const attempts: AgentEvalOutcome["attempts"] = [];
+  for (let i = 0; i < repeats; i++) {
+    const deps = makeDeps();
+    await evalCase.setup?.(deps);
+    const result = await runAgent({
+      workflow,
+      model,
+      deps,
+      tenantId: evalCase.tenantId,
+      requestId: `${evalCase.id}-${i}`,
+      userMessage: evalCase.userMessage,
+      timeoutMs: 120_000,
+    });
+    const failures =
+      result.status === "completed"
+        ? await evalCase.check({ deps, result }).catch((e: unknown) => [`check threw: ${String(e)}`])
+        : [`run ${result.status}: ${result.error}`];
+    const infraError = result.status === "failed" && INFRA_ERRORS.has(result.error ?? "");
+    attempts.push({ pass: failures.length === 0, infraError, failures, result });
+  }
+  return { id: evalCase.id, title: evalCase.title, passes: attempts.filter((a) => a.pass).length, attempts };
 }

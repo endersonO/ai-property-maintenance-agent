@@ -26,9 +26,16 @@ export type Usage = { inputTokens: number; outputTokens: number };
 // Either a final answer (no tool calls) or a request to run tools.
 export type ModelResponse = { text: string | null; toolCalls: ToolCall[]; usage: Usage };
 
+export type ModelInput = {
+  messages: Message[];
+  tools: ToolSpec[];
+  // Aborted when the run's deadline passes: implementations must cancel in-flight work.
+  signal?: AbortSignal;
+};
+
 export interface ModelPort {
   readonly id: string;
-  next(input: { messages: Message[]; tools: ToolSpec[] }): Promise<ModelResponse>;
+  next(input: ModelInput): Promise<ModelResponse>;
 }
 
 // JSON Schema generated from the same Zod schemas the executor validates with.
@@ -53,7 +60,7 @@ export class ScriptedModel implements ModelPort {
 
   constructor(private readonly script: ScriptStep[]) {}
 
-  async next({ messages, tools }: { messages: Message[]; tools: ToolSpec[] }): Promise<ModelResponse> {
+  async next({ messages, tools }: ModelInput): Promise<ModelResponse> {
     this.seen.push(structuredClone(messages));
     this.seenTools.push(tools);
     const current = this.script[this.step++];

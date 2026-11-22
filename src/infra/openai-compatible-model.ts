@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { Message, ModelPort, ModelResponse, ToolSpec } from "@/runtime/model";
+import type { Message, ModelInput, ModelPort, ModelResponse } from "@/runtime/model";
 
 // Adapter for any provider exposing the OpenAI Chat Completions API (Gemini, OpenAI,
 // Groq, OpenRouter, Ollama...). Switching provider is configuration, not code.
@@ -8,8 +8,14 @@ export type OpenAICompatibleConfig = {
   apiKey: string;
   baseURL?: string;
   model: string;
+  // Sent only when set: some models reject the parameter entirely.
   temperature?: number;
+  // For tests.
+  fetch?: typeof fetch;
 };
+
+// Provider extension on tool calls, not in the OpenAI types (e.g. Gemini thought signatures).
+type ProviderToolCall = { extra_content?: unknown };
 
 export class OpenAICompatibleModel implements ModelPort {
   readonly id: string;
@@ -17,26 +23,40 @@ export class OpenAICompatibleModel implements ModelPort {
 
   constructor(private readonly config: OpenAICompatibleConfig) {
     this.id = config.model;
-    // The SDK retries 429/5xx with backoff ("high demand" spikes on free tiers).
-    this.client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL, maxRetries: 2 });
+    // The SDK retries 429/5xx with backoff; the run's abort signal cancels retries too.
+    this.client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      maxRetries: 2,
+      ...(config.fetch && { fetch: config.fetch }),
+    });
   }
 
-  async next({ messages, tools }: { messages: Message[]; tools: ToolSpec[] }): Promise<ModelResponse> {
-    const completion = await this.client.chat.completions.create({
-      model: this.config.model,
-      temperature: this.config.temperature ?? 0,
-      messages: messages.map(toProviderMessage),
-      tools: tools.map((t) => ({
-        type: "function" as const,
-        function: { name: t.name, description: t.description, parameters: withoutSchemaKey(t.parameters) },
-      })),
-    });
+  async next({ messages, tools, signal }: ModelInput): Promise<ModelResponse> {
+    const completion = await this.client.chat.completions.create(
+      {
+        model: this.config.model,
+        ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
+        messages: messages.map(toProviderMessage),
+        tools: tools.map((t) => ({
+          type: "function" as const,
+          function: { name: t.name, description: t.description, parameters: withoutSchemaKey(t.parameters) },
+        })),
+      },
+      { signal },
+    );
 
-    const choice = completion.choices[0]?.message;
+    const choice = completion.choices[0];
+    // A truncated or filtered answer must never be treated as a final answer.
+    if (choice?.finish_reason === "length" || choice?.finish_reason === "content_filter") {
+      throw new Error(`Incomplete model response: ${choice.finish_reason}`);
+    }
+
+    const message = choice?.message;
     const usage = completion.usage;
     return {
-      text: choice?.content ?? null,
-      toolCalls: (choice?.tool_calls ?? [])
+      text: message?.content ?? null,
+      toolCalls: (message?.tool_calls ?? [])
         .filter((call) => call.type === "function")
         .map((call) => ({
           id: call.id,
@@ -52,9 +72,6 @@ export class OpenAICompatibleModel implements ModelPort {
     };
   }
 }
-
-// Provider extension on tool calls, not in the OpenAI types (e.g. Gemini thought signatures).
-type ProviderToolCall = { extra_content?: unknown };
 
 function toProviderMessage(message: Message): OpenAI.Chat.ChatCompletionMessageParam {
   switch (message.role) {

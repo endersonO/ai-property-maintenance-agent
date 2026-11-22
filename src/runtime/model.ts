@@ -19,6 +19,14 @@ export type Message =
   | { role: "assistant"; content: string | null; toolCalls: ToolCall[] }
   | { role: "tool"; toolCallId: string; name: string; content: string };
 
+// The model answered, but the answer is unusable (truncated, filtered). This is a model
+// outcome and counts as a failure in evals — unlike provider/network errors.
+export class ModelOutputError extends Error {
+  constructor(readonly reason: string) {
+    super(`Incomplete model response: ${reason}`);
+  }
+}
+
 export type ToolSpec = { name: string; description: string; parameters: Record<string, unknown> };
 
 export type Usage = { inputTokens: number; outputTokens: number };

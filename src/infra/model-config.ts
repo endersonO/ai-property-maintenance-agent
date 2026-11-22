@@ -13,11 +13,14 @@ export function createModelFromEnv(env: NodeJS.ProcessEnv = process.env): ModelP
   const apiKey = env.MODEL_API_KEY ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Set GEMINI_API_KEY (or MODEL_API_KEY) to use a real model");
 
+  const rateLimited = Boolean(env.MODEL_RPM);
   const model = new OpenAICompatibleModel({
     apiKey,
     baseURL: env.MODEL_BASE_URL ?? GEMINI_BASE_URL,
     model: env.MODEL_NAME ?? "gemini-3.5-flash-lite",
     temperature: env.MODEL_TEMPERATURE ? Number(env.MODEL_TEMPERATURE) : undefined,
+    // With a rate limit, retries move into the limiter so they also respect the quota.
+    maxRetries: rateLimited ? 0 : undefined,
   });
-  return env.MODEL_RPM ? new RateLimitedModel(model, Number(env.MODEL_RPM)) : model;
+  return rateLimited ? new RateLimitedModel(model, Number(env.MODEL_RPM)) : model;
 }

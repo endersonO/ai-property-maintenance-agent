@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { Message, ModelInput, ModelPort, ModelResponse } from "@/runtime/model";
+import { ModelOutputError, type Message, type ModelInput, type ModelPort, type ModelResponse } from "@/runtime/model";
 
 // Adapter for any provider exposing the OpenAI Chat Completions API (Gemini, OpenAI,
 // Groq, OpenRouter, Ollama...). Switching provider is configuration, not code.
@@ -10,6 +10,9 @@ export type OpenAICompatibleConfig = {
   model: string;
   // Sent only when set: some models reject the parameter entirely.
   temperature?: number;
+  // SDK-level retries. Set to 0 when a RateLimitedModel handles retries, so every
+  // attempt goes through the rate limiter.
+  maxRetries?: number;
   // For tests.
   fetch?: typeof fetch;
 };
@@ -23,11 +26,11 @@ export class OpenAICompatibleModel implements ModelPort {
 
   constructor(private readonly config: OpenAICompatibleConfig) {
     this.id = config.model;
-    // The SDK retries 429/5xx with backoff; the run's abort signal cancels retries too.
+    // The run's abort signal cancels in-flight requests and any SDK retries.
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
-      maxRetries: 2,
+      maxRetries: config.maxRetries ?? 2,
       ...(config.fetch && { fetch: config.fetch }),
     });
   }
@@ -49,7 +52,7 @@ export class OpenAICompatibleModel implements ModelPort {
     const choice = completion.choices[0];
     // A truncated or filtered answer must never be treated as a final answer.
     if (choice?.finish_reason === "length" || choice?.finish_reason === "content_filter") {
-      throw new Error(`Incomplete model response: ${choice.finish_reason}`);
+      throw new ModelOutputError(choice.finish_reason);
     }
 
     const message = choice?.message;

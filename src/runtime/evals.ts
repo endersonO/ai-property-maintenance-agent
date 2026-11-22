@@ -101,6 +101,8 @@ export type AgentEvalOutcome = {
   attempts: { pass: boolean; infraError: boolean; failures: string[]; result: RunResult }[];
 };
 
+// Provider/network errors and timeouts only. Unusable model output (`incomplete_response`,
+// `empty_response`) and `max_steps_exceeded` are the model's outcomes and are scored.
 const INFRA_ERRORS = new Set(["model_error", "timeout", "trace_unavailable"]);
 
 export async function runAgentEval<Deps>(

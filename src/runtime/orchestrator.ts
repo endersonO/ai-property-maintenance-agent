@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { executeToolCall } from "./executor";
-import { toToolSpecs, type Message, type ModelPort, type ModelResponse, type Usage } from "./model";
+import {
+  ModelOutputError,
+  toToolSpecs,
+  type Message,
+  type ModelPort,
+  type ModelResponse,
+  type Usage,
+} from "./model";
 import { estimateCostUsd, redact, type RunMeta, type TraceStore } from "./tracing";
 import type { ExecutorStage, ToolResult, WorkflowDefinition } from "./types";
 
@@ -156,7 +163,9 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
         toolCalls: [],
         error: message,
       });
-      return finish("failed", null, message === "timeout" ? "timeout" : "model_error");
+      const reason =
+        error instanceof ModelOutputError ? "incomplete_response" : message === "timeout" ? "timeout" : "model_error";
+      return finish("failed", null, reason);
     }
 
     usage.inputTokens += response.usage.inputTokens;

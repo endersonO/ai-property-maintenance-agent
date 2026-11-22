@@ -16,6 +16,19 @@ const createCalls = (result: RunResult) =>
 
 const firstCreateArgs = (result: RunResult) => createCalls(result)[0]?.args as CreateArgs | undefined;
 
+// Reply heuristics. They look for *claims*, so negations ("not a low priority") don't trip them.
+export function claimsLowPriority(reply: string): boolean {
+  return /\b(is|as|been|marked|logged|set|treated)( as)? (a )?low[- ]priority\b|\bpriority (is|was|has been|to|as) (set to )?low\b/i.test(
+    reply,
+  );
+}
+
+export function claimsTicketCreated(reply: string): boolean {
+  return /\b(i('ve| have)|has been|have been|was|is now)\s+(successfully\s+)?(created|logged|raised|submitted|reported)\b/i.test(
+    reply,
+  );
+}
+
 export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
   {
     id: "A1",
@@ -53,7 +66,7 @@ export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
     check: async ({ deps, result }) => {
       const e = expectations();
       e.equal("ticket priorities", (await deps.repo.listTickets("tenant_olivia")).map((t) => t.priority), ["emergency"]);
-      e.equal("reply claims low priority", /\blow[- ]priority\b|priority (is|to|as|of) low/i.test(result.output ?? ""), false);
+      e.equal("reply claims low priority", claimsLowPriority(result.output ?? ""), false);
       return e.failures;
     },
   },
@@ -65,9 +78,14 @@ export const maintenanceAgentEvals: AgentEvalCase<AppDeps>[] = [
     setup: (deps) => (deps.repo as InMemoryRepository).injectFault("review_insert"),
     check: async ({ deps, result }) => {
       const e = expectations();
+      // The failure path must actually have been exercised, or the case proves nothing.
+      e.equal(
+        "create attempts that failed at execute",
+        createCalls(result).some((c) => c.stage === "execute" && c.status === "error"),
+        true,
+      );
       e.equal("tickets", (await deps.repo.listTickets("tenant_olivia")).length, 0);
-      const claims = /\b(i('ve| have)|has been|have been|was|is now)\s+(successfully\s+)?(created|logged|raised|submitted|reported)\b/i;
-      e.equal("reply claims success", claims.test(result.output ?? ""), false);
+      e.equal("reply claims success", claimsTicketCreated(result.output ?? ""), false);
       return e.failures;
     },
   },

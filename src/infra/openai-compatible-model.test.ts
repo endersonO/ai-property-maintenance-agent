@@ -88,11 +88,41 @@ describe("OpenAICompatibleModel", () => {
 });
 
 describe("RateLimitedModel", () => {
+  const ok = { text: "ok", toolCalls: [], usage: { inputTokens: 0, outputTokens: 0 } };
+
   it("spaces calls to the configured requests per minute", async () => {
-    const inner = { id: "m", next: async () => ({ text: "ok", toolCalls: [], usage: { inputTokens: 0, outputTokens: 0 } }) };
-    const model = new RateLimitedModel(inner, 1200); // one call every 50 ms
+    const model = new RateLimitedModel({ id: "m", next: async () => ok }, 1200); // one call every 50 ms
     const startedAt = Date.now();
     await Promise.all([model.next(input), model.next(input), model.next(input)]);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(95);
+  });
+
+  it("puts every retry through the limiter", async () => {
+    const calls: number[] = [];
+    const flaky = {
+      id: "m",
+      next: async () => {
+        calls.push(Date.now());
+        if (calls.length < 3) throw Object.assign(new Error("quota"), { status: 429 });
+        return ok;
+      },
+    };
+    await new RateLimitedModel(flaky, 1200, 2).next(input);
+    expect(calls).toHaveLength(3);
+    expect(calls[1] - calls[0]).toBeGreaterThanOrEqual(45);
+    expect(calls[2] - calls[1]).toBeGreaterThanOrEqual(45);
+  });
+
+  it("does not retry non-retryable errors", async () => {
+    let calls = 0;
+    const broken = {
+      id: "m",
+      next: async () => {
+        calls++;
+        throw Object.assign(new Error("bad request"), { status: 400 });
+      },
+    };
+    await expect(new RateLimitedModel(broken, 1200, 2).next(input)).rejects.toThrow("bad request");
+    expect(calls).toBe(1);
   });
 });

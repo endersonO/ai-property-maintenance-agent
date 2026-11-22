@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { periodRanges } from "./periods";
+import { lastTwelveMonthKeys, periodRanges } from "./periods";
 
 const asOf = new Date("2026-11-01T00:00:00Z");
 const labels = (p: ReturnType<typeof periodRanges>) => [p.current.label, p.previous.label, p.lastYear.label, p.months];
@@ -24,5 +24,11 @@ describe("periodRanges", () => {
       "2024-11..2025-10",
       12,
     ]);
+  });
+
+  it("lists all 12 closed months before the cut-off, with or without data", () => {
+    const months = lastTwelveMonthKeys(asOf);
+    expect(months).toHaveLength(12);
+    expect([months[0], months[1], months[11]]).toEqual(["2025-11", "2025-12", "2026-10"]);
   });
 });

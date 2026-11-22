@@ -101,6 +101,8 @@ export const operationsBriefEvals: EvalCase<OpsDeps>[] = [
       const [call] = toolEvents(results[0]);
       const agencies = call?.result.ok ? (call.result.data as { facts: { agency: string }[] }).facts.map((f) => f.agency) : [];
       e.equal("agencies returned", agencies, ["Northbridge Lettings", "Riverside Homes", "all your agencies"]);
+      const ids = call?.result.ok ? (call.result.data as { facts: { agency_id: string }[] }).facts.map((f) => f.agency_id) : [];
+      e.equal("agency ids returned", ids, ["agency_northbridge", "agency_riverside", "all"]);
       return e.failures;
     },
   },
@@ -145,6 +147,25 @@ export const operationsBriefEvals: EvalCase<OpsDeps>[] = [
       const [call] = toolEvents(results[0]);
       e.equal("stage/status", [call?.stage, call?.status], ["validate", "rejected"]);
       e.equal("queries run", calls(deps).length, 0);
+      return e.failures;
+    },
+  },
+  {
+    id: "E14",
+    title: "list_my_agencies gives ids and names for the manager's scope only",
+    actorId: "manager_north",
+    runs: [
+      {
+        requestId: "e14",
+        userMessage: "Which agencies do I manage?",
+        script: [{ toolCalls: [{ name: "list_my_agencies", args: {} }] }, { text: "Northbridge Lettings and Riverside Homes." }],
+      },
+    ],
+    check: async ({ results }) => {
+      const e = expectations();
+      const [call] = toolEvents(results[0]);
+      const listed = call?.result.ok ? (call.result.data as { agency_id: string }[]).map((a) => a.agency_id) : [];
+      e.equal("agencies listed", listed, ["agency_northbridge", "agency_riverside"]);
       return e.failures;
     },
   },

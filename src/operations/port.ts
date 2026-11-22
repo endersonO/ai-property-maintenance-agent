@@ -15,8 +15,11 @@ export type BriefQuery = Pick<MetricScope, "period" | "agencyIds">;
 
 export type ManagerScope = { managerId: string; name: string; agencyIds: string[] };
 
+export type AgencyProfile = { id: string; name: string; acquiredOn: string | null; onboardedOn: string | null };
+
 export interface OperationsPort {
   agencyNames(agencyIds: string[]): Promise<Record<string, string>>;
+  agencies(agencyIds: string[]): Promise<AgencyProfile[]>;
   volume(query: BriefQuery): Promise<BriefReport>;
   resolution(query: BriefQuery & { priority: "emergency" | "high" | "normal" | "low" | null }): Promise<BriefReport>;
 }

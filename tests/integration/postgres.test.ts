@@ -15,7 +15,7 @@ import {
 import { evaluators as allEvaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 import { replaceSyntheticHistory } from "@/infra/operations-store";
-import { managerScope, PostgresOperations } from "@/infra/postgres-operations";
+import { managerScope, operationsDashboard, PostgresOperations } from "@/infra/postgres-operations";
 import { resolutionFacts, volumeFacts, type Fact } from "@/infra/operations-queries";
 import { demoHistoryAgencies, generateHistory } from "@/operations/history";
 
@@ -756,6 +756,28 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       expect(await volumeFacts(spy, scope)).toEqual(await volumeFacts(sql, scope));
       expect(await resolutionFacts(spy, scope)).toEqual(await resolutionFacts(sql, scope));
       expect(modes).toEqual(["isolation level repeatable read read only", "isolation level repeatable read read only"]);
+    });
+
+    it("the dashboard shows the same figures as the brief's queries, plus the monthly trend", async () => {
+      const dashboard = await operationsDashboard(sql, scope.agencyIds);
+      if (!dashboard) throw new Error("expected a dashboard");
+      // Same queries, same snapshot: the page and a brief can't disagree.
+      expect(dashboard.volume).toEqual(await volumeFacts(sql, scope));
+      expect(dashboard.resolution).toEqual(await resolutionFacts(sql, scope));
+      // Northbridge per month: 1 ticket / 400 homes = 0.25 (Apr, May, Jul, Aug), 0 in Jun, 2 in Sep.
+      const northbridge = dashboard.monthly.facts.filter((f) => f.agencyId === "agency_northbridge").map((f) => [f.period, f.value]);
+      expect(northbridge).toEqual([
+        ["2026-04", 0.25],
+        ["2026-05", 0.25],
+        ["2026-06", 0],
+        ["2026-07", 0.25],
+        ["2026-08", 0.25],
+        ["2026-09", 0.5],
+      ]);
+      expect(dashboard.agencies.map((a) => [a.name, a.acquiredOn])).toEqual([
+        ["Northbridge Lettings", null],
+        ["Riverside Homes", "2026-03-01"],
+      ]);
     });
 
     it("a month after the history ends is 'no data', never a 100 % drop", async () => {

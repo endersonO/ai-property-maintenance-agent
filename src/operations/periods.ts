@@ -40,3 +40,12 @@ export function periodRanges(period: PeriodKey, asOf: Date): PeriodRanges {
   const previous = twelve(utc(y, m - 24));
   return { current, previous, lastYear: previous, months: 12 };
 }
+
+// The calendar months ("YYYY-MM") of the last 12 closed months before asOf — every month,
+// whether or not it has data, so a gap shows as a gap.
+export function lastTwelveMonthKeys(asOf: Date): string[] {
+  const { current } = periodRanges("last_12_closed_months", asOf);
+  return Array.from({ length: 12 }, (_, i) =>
+    monthLabel(utc(current.start.getUTCFullYear(), current.start.getUTCMonth() + i)),
+  );
+}

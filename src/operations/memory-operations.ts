@@ -15,6 +15,12 @@ export class InMemoryOperations implements OperationsPort {
     return Object.fromEntries(seed.agencies.filter((a) => agencyIds.includes(a.id)).map((a) => [a.id, a.name]));
   }
 
+  async agencies(agencyIds: string[]) {
+    return seed.agencies
+      .filter((a) => agencyIds.includes(a.id))
+      .map((a) => ({ id: a.id, name: a.name, acquiredOn: a.acquiredOn, onboardedOn: a.onboardedOn }));
+  }
+
   private filtered(report: Report, query: BriefQuery): BriefReport {
     return {
       facts: report.facts.filter((f) => f.agencyId === "all" || query.agencyIds.includes(f.agencyId)),

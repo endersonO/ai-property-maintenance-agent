@@ -324,3 +324,39 @@ export async function readResolution(sql: postgres.Sql, scope: ResolutionScope):
   }
   return { facts, notes };
 }
+
+// Monthly tickets per 100 homes for the last 12 closed months, per agency — the trend line.
+// Only months with portfolio data: tickets and homes of the same month, as in readVolume.
+export async function readMonthlyRates(
+  sql: postgres.Sql,
+  scope: Pick<MetricScope, "asOf" | "agencyIds">,
+): Promise<Report> {
+  const { current } = periodRanges("last_12_closed_months", scope.asOf);
+  const rows = await sql`
+    select p.agency_id, to_char(p.month, 'YYYY-MM') as month, p.properties,
+           coalesce(c.n, 0)::int as tickets
+    from synthetic_portfolio p
+    left join (
+      select agency_id, date_trunc('month', created_at at time zone 'UTC')::date as month, count(*) as n
+      from ops.operations_tickets
+      where dataset = 'synthetic' and agency_id = any(${scope.agencyIds})
+      group by 1, 2
+    ) c on c.agency_id = p.agency_id and c.month = p.month
+    where p.agency_id = any(${scope.agencyIds})
+      and p.month >= ${isoDay(current.start)}::date and p.month < ${isoDay(current.end)}::date
+    order by p.agency_id, p.month
+  `;
+  return {
+    facts: rows.map((r) =>
+      fact({
+        metric: "tickets_per_100_homes",
+        agencyId: r.agency_id,
+        period: r.month,
+        unit: "tickets_per_100_homes_per_month",
+        value: round((r.tickets / r.properties) * 100, 2),
+        n: r.tickets,
+      }),
+    ),
+    notes: [],
+  };
+}

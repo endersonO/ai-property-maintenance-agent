@@ -11,7 +11,8 @@ import type { EvaluableRun, Evaluator } from "@/runtime/evaluation";
 // free text against numbers can't be exhaustive (paraphrased figures, words like "half"), hence
 // a monitor: it flags runs for triage, it doesn't gate CI.
 
-type CitedFact = { key: string; metric?: string; agency: string; value: number };
+// n: the observations behind a statistic ("100% of 43 tickets" cites a share whose n is 43).
+type CitedFact = { key: string; metric?: string; agency: string; value: number; n?: number };
 
 const CITATION = /\[([a-z0-9_.\-]+)\]/gi;
 // Numbers that are not figures: dates and period labels (2026-11-01, 2026-Q3, 2025-11..2026-10),
@@ -28,7 +29,7 @@ function factsOf(run: EvaluableRun): Map<string, CitedFact> {
   for (const call of run.toolCalls) {
     if (!call.result.ok) continue;
     const data = call.result.data as { facts?: CitedFact[] };
-    for (const f of data?.facts ?? []) facts.set(f.key, { key: f.key, metric: f.metric, agency: f.agency, value: f.value });
+    for (const f of data?.facts ?? []) facts.set(f.key, { key: f.key, metric: f.metric, agency: f.agency, value: f.value, n: f.n });
   }
   return facts;
 }
@@ -106,7 +107,11 @@ export function checkGrounding(reply: string, facts: Map<string, CitedFact>): Gr
       if (!matches(first, fact, segment)) {
         problems.push({ sentence: sentence.trim(), problem: `${first} does not match [${fact.key}] = ${fact.value}` });
       }
-      for (const n of extra) problems.push({ sentence: sentence.trim(), problem: `${n} has no citation of its own` });
+      // A second figure may be the cited statistic's own n; anything else needs its own citation.
+      for (const n of extra) {
+        if (fact.n !== undefined && Number(n) === fact.n) continue;
+        problems.push({ sentence: sentence.trim(), problem: `${n} has no citation of its own` });
+      }
       if (!/^all\b/i.test(fact.agency)) {
         const named = lastNamedAgency(sentence, token.index, agencies);
         if (named !== fact.agency) {

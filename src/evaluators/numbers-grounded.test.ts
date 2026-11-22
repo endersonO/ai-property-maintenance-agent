@@ -91,6 +91,21 @@ describe("numbers_grounded", () => {
     expect(problems("Riverside had a lower median of 6.1 hours [median_hours_to_resolve_emergency.agency_riverside.2026-Q3].")).toEqual([]);
   });
 
+  it("lets a statistic be written with its own n, but no other extra figure", () => {
+    const share = new Map([["resolved_share.agency_riverside.2026-Q3", {
+      key: "resolved_share.agency_riverside.2026-Q3",
+      metric: "resolved_share",
+      agency: "Riverside Homes",
+      value: 100,
+      n: 43,
+    }]]);
+    const check = (reply: string) => checkGrounding(reply, share).map((p) => p.problem);
+    expect(check("Riverside Homes resolved 100% of its 43 tickets [resolved_share.agency_riverside.2026-Q3].")).toEqual([]);
+    expect(check("Riverside Homes resolved 100% of its 44 tickets [resolved_share.agency_riverside.2026-Q3].")).toEqual([
+      "44 has no citation of its own",
+    ]);
+  });
+
   it("ignores a bracketed label that carries no figure", () => {
     expect(problems("This is synthetic demonstration data [dataset], with states as of 2026-11-01.")).toEqual([]);
   });

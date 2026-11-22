@@ -11,7 +11,10 @@ import { defineTool, type ToolContext } from "@/runtime/types";
 type Ctx = ToolContext<OpsDeps>;
 
 const Period = z.enum(PERIODS).describe("A closed reporting period; never the current, incomplete one.");
-const AgencyFilter = z.string().nullable().describe("One agency id to focus on, or null for all agencies you manage.");
+const AgencyFilter = z
+  .string()
+  .nullable()
+  .describe("One agency id from list_my_agencies (e.g. agency_riverside) to focus on, or null for all agencies you manage.");
 
 const ScopeInput = z.strictObject({ period: Period, agency_id: AgencyFilter });
 type ScopeInput = z.infer<typeof ScopeInput>;
@@ -44,6 +47,7 @@ async function present(ctx: Ctx, report: BriefReport) {
       key: f.key,
       metric: f.metric,
       agency: f.agencyId === "all" ? "all your agencies" : (names[f.agencyId] ?? f.agencyId),
+      agency_id: f.agencyId,
       period: f.period,
       unit: f.unit,
       value: f.value,
@@ -77,4 +81,18 @@ export const getResolution = defineTool<OpsDeps, ResolutionInput>({
     present(ctx, await ctx.deps.operations.resolution({ ...queryOf(ctx, args), priority: args.priority })),
 });
 
-export const operationsBriefTools = [getVolume, getResolution];
+export const listMyAgencies = defineTool<OpsDeps, Record<string, never>>({
+  name: "list_my_agencies",
+  description: "The agencies you manage: their ids (to pass as agency_id), names, and acquisition/onboarding dates.",
+  input: z.strictObject({}),
+  authorize: (ctx) => authorizeAgency(ctx, { agency_id: null }),
+  execute: async (ctx) =>
+    (await ctx.deps.operations.agencies(ctx.deps.scope.agencyIds)).map((a) => ({
+      agency_id: a.id,
+      name: a.name,
+      acquired_on: a.acquiredOn,
+      onboarded_on: a.onboardedOn,
+    })),
+});
+
+export const operationsBriefTools = [listMyAgencies, getVolume, getResolution];

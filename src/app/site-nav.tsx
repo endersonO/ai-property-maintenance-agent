@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
-// Demo navigation between the two personas: the tenant's portal and the operator's Inspector.
+// Demo navigation between the personas: the tenant's portal, the operations manager's view and
+// the platform team's Inspector.
 // In a real product these would be separate apps with separate authentication.
 
 const LINKS = [
   { id: "portal", href: "/", label: "Tenant portal" },
+  { id: "operations", href: "/operations", label: "Operations" },
   { id: "inspector", href: "/inspector", label: "Agent Inspector" },
 ] as const;
 

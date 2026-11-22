@@ -6,6 +6,8 @@ import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
 import { getRunDetail, listRuns, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
+import { loadEvaluableRun } from "@/infra/evaluation-store";
+import { snapshotFromResult } from "@/runtime/evaluation";
 import * as seed from "@/infra/seed-data";
 import { ScriptedModel } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
@@ -94,6 +96,59 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         const ctx = await repo.getTenantContext(t.id);
         expect(ctx?.property.id).toBe(t.propertyId);
       }
+    });
+
+    it("the evaluable snapshot loaded from the database equals the one built in memory", async () => {
+      const userMessage = "Leak in the kitchen, call me on 07700 900123";
+      const result = await runAgent({
+        workflow: maintenanceWorkflow,
+        model: new ScriptedModel([
+          // One rejected call (another tenant's property) and one successful create.
+          { toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_lds_1", category: "plumbing", hazards: [], location: null, description: "Leak" } }] },
+          {
+            toolCalls: [
+              {
+                name: "create_maintenance_ticket",
+                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak, email me at olivia@example.com" },
+              },
+            ],
+          },
+          { text: "Ticket created. We'll call 07700 900123." },
+        ]),
+        deps: { repo },
+        tenantId: "tenant_olivia",
+        requestId: "req-snapshot",
+        userMessage,
+        trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge" } },
+      });
+
+      const fromMemory = snapshotFromResult(result, {
+        workflowId: "maintenance",
+        tenantId: "tenant_olivia",
+        agencyId: "agency_northbridge",
+        source: "portal",
+        userMessage,
+      });
+      // Strict: an `undefined` property kept in memory but dropped by JSON would be a difference.
+      expect(await loadEvaluableRun(sql, result.runId)).toStrictEqual(fromMemory);
+      expect(fromMemory.toolCalls.map((c) => [c.stage, c.status])).toEqual([
+        ["authorize", "rejected"],
+        ["execute", "ok"],
+      ]);
+      expect(fromMemory.userMessage).not.toContain("07700");
+    });
+
+    it("does not build a snapshot for a run that is still running", async () => {
+      expect(await loadEvaluableRun(sql, await newRun())).toBeNull();
+    });
+
+    it("loads a finished run without a tenant as tenantId null", async () => {
+      const runId = randomUUID();
+      await sql`
+        insert into runs (id, workflow_id, request_id, source, model, input, status)
+        values (${runId}, 'maintenance', 'req-no-tenant', 'eval', 'test', '{"userMessage":"hi"}', 'failed')
+      `;
+      expect(await loadEvaluableRun(sql, runId)).toMatchObject({ tenantId: null, agencyId: null, toolCalls: [] });
     });
 
     it("persists a full traced run that can be explained with one query", async () => {

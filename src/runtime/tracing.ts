@@ -67,12 +67,17 @@ export function estimateCostUsd(model: string, usage: Usage): number | null {
 }
 
 // Traces keep the shape of every payload but not personal contact details.
-// Identifiers are never redacted: a trace must stay joinable to its tickets and runs.
+// Identifiers are kept so a trace stays joinable to its tickets and runs, but only values
+// that look like identifiers: an id field is model-controlled and could carry an email.
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 // Not glued to letters or hyphens (UUID segments, ISO dates); at least 10 digits.
 const PHONE = /(?<![\w-])\+?\d[\d\s().-]{7,}\d(?![\w-])/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ID_KEY = /(^id$|_id$|Id$)/;
+// UUIDs and slugs (tenant_olivia, prop_mcr_1): no spaces, "@", "+" or dots.
+const ID_VALUE = /^[\w-]{1,100}$/;
+const keepAsId = (key: string, value: unknown) =>
+  ID_KEY.test(key) && (value === null || typeof value === "number" || (typeof value === "string" && ID_VALUE.test(value)));
 
 function redactText(text: string): string {
   if (UUID.test(text)) return text;
@@ -86,7 +91,7 @@ export function redact<T>(value: T): T {
   if (Array.isArray(value)) return value.map(redact) as T;
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, ID_KEY.test(k) ? v : redact(v)]),
+      Object.entries(value).map(([k, v]) => [k, keepAsId(k, v) ? v : redact(v)]),
     ) as T;
   }
   return value;

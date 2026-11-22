@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ScriptedModel, type ModelPort } from "./model";
 import { runAgent } from "./orchestrator";
@@ -80,5 +80,62 @@ describe("runAgent", () => {
     const result = await run(slow, { timeoutMs: 20 });
 
     expect(result).toMatchObject({ status: "failed", output: null, error: "timeout" });
+  });
+
+  it("does not start a tool once the deadline has passed", async () => {
+    const executed: number[] = [];
+    let skew = 0;
+    const now = Date.now;
+    vi.spyOn(Date, "now").mockImplementation(() => now() + skew);
+    const clockJump = defineTool<object, { n: number }>({
+      name: "ping",
+      description: "Echo a number",
+      input: z.strictObject({ n: z.number() }),
+      execute: async (_ctx, args) => {
+        executed.push(args.n);
+        skew += 60_000; // the first call returns, but the deadline has now passed
+        return { pong: args.n };
+      },
+    });
+    const model = new ScriptedModel([
+      { toolCalls: [{ name: "ping", args: { n: 1 } }, { name: "ping", args: { n: 2 } }] },
+      { text: "never" },
+    ]);
+    const result = await runAgent({
+      workflow: { ...workflow, tools: [clockJump] },
+      model,
+      deps: {},
+      tenantId: "t1",
+      requestId: "r1",
+      userMessage: "hi",
+      timeoutMs: 1_000,
+    });
+    vi.restoreAllMocks();
+
+    expect(result).toMatchObject({ status: "failed", output: null, error: "timeout" });
+    expect(executed).toEqual([1]);
+  });
+
+  it("a hung tool cannot hold the run past its deadline", async () => {
+    const hung = defineTool<object, { n: number }>({
+      name: "ping",
+      description: "Never answers",
+      input: z.strictObject({ n: z.number() }),
+      execute: () => new Promise(() => {}),
+    });
+    const startedAt = Date.now();
+    const result = await runAgent({
+      workflow: { ...workflow, tools: [hung] },
+      model: new ScriptedModel([{ toolCalls: [{ name: "ping", args: { n: 1 } }] }, { text: "never" }]),
+      deps: {},
+      tenantId: "t1",
+      requestId: "r1",
+      userMessage: "hi",
+      timeoutMs: 30,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(result).toMatchObject({ status: "failed", output: null, error: "tool_timeout" });
+    expect(result.events.at(-1)).toMatchObject({ type: "tool_call", status: "error", result: { code: "timeout" } });
   });
 });

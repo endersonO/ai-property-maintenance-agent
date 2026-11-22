@@ -72,6 +72,24 @@ export function repositoryContract(
       expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
     });
 
+    it("escalates the existing ticket when a repeat is more severe, atomically with its review", async () => {
+      const { repo, runId } = await setup();
+      const review = {
+        runId,
+        agencyId: "agency_northbridge",
+        tenantId: "tenant_olivia",
+        source: "policy" as const,
+        reason: "emergencies always require human review",
+      };
+      const first = await repo.createTicketWithReview(ticket(runId, { priority: "normal", hazards: [] }), null);
+      const second = await repo.createTicketWithReview(ticket(runId), review);
+      expect(second).toMatchObject({ duplicate: true, escalated: true });
+      expect(second.ticket).toMatchObject({ id: first.ticket.id, priority: "emergency", hazards: ["active_water_leak"] });
+      expect(second.review?.ticketId).toBe(first.ticket.id);
+      expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+      expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
+    });
+
     it("keeps separate requests as separate tickets", async () => {
       const { repo, runId } = await setup();
       await repo.createTicketWithReview(ticket(runId, { idempotencyKey: "key-1" }), null);

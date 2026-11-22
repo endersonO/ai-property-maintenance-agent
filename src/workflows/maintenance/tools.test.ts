@@ -76,6 +76,32 @@ describe("create_maintenance_ticket", () => {
     expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
   });
 
+  it("a more severe repeat of the same request escalates the ticket instead of being swallowed", async () => {
+    const { repo, call } = setup("tenant_olivia");
+    // The model first misses the leak, then reports it within the same request.
+    const routine = await call("create_maintenance_ticket", { ...leak, hazards: [] });
+    expect(routine.result).toMatchObject({ ok: true, data: { priority: "normal", sent_to_human_review: false } });
+    const escalated = await call("create_maintenance_ticket", leak);
+    expect(escalated.result).toMatchObject({
+      ok: true,
+      data: { duplicate: true, escalated: true, priority: "emergency", sent_to_human_review: true },
+    });
+
+    const [ticket] = await repo.listTickets("tenant_olivia");
+    expect(ticket).toMatchObject({ priority: "emergency", hazards: ["active_water_leak"] });
+    expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+    const [review] = await repo.listReviews("tenant_olivia");
+    expect(review).toMatchObject({ ticketId: ticket.id, reason: expect.stringContaining("escalated") });
+  });
+
+  it("a less severe repeat never downgrades the ticket", async () => {
+    const { repo, call } = setup("tenant_olivia");
+    await call("create_maintenance_ticket", leak);
+    const repeat = await call("create_maintenance_ticket", { ...leak, hazards: [] });
+    expect(repeat.result).toMatchObject({ ok: true, data: { duplicate: true, escalated: false, priority: "emergency" } });
+    expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
+  });
+
   it("separate requests, same category, same day: two tickets, the second an emergency", async () => {
     const { repo, ctx, call } = setup("tenant_olivia", "req-morning");
     await call("create_maintenance_ticket", {

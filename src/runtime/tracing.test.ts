@@ -158,6 +158,18 @@ describe("redact", () => {
     expect(redact(payload)).toEqual(payload);
   });
 
+  it("redacts contact details hidden in id fields", () => {
+    expect(redact({ ticket_id: "olivia@example.com", tenantId: "call +44 7700 900123" })).toEqual({
+      ticket_id: "[email]",
+      tenantId: "call [phone]",
+    });
+  });
+
+  it("keeps null ids as they are, e.g. a human review requested without a ticket", () => {
+    const call = { reason: "Rent question", ticket_id: null };
+    expect(redact(call)).toEqual(call);
+  });
+
   it("redacts phone numbers in UK formats", () => {
     expect(redact("call 07700 900123 or +44 (0)7700-900-123")).toBe("call [phone] or [phone]");
   });

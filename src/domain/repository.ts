@@ -1,4 +1,4 @@
-import type { Category, Hazard, Priority, TicketStatus } from "./enums";
+import { Priority, type Category, type Hazard, type TicketStatus } from "./enums";
 import type { Policy } from "./policy";
 
 // Port used by the tools. Implemented in memory (evals) and on PostgreSQL (app).
@@ -46,8 +46,41 @@ export type Review = NewReview & {
 
 export type CreateTicketResult =
   | { duplicate: false; ticket: Ticket; review: Review | null }
-  // Same idempotency key: the existing ticket is returned and nothing is written.
-  | { duplicate: true; ticket: Ticket; review: null };
+  // Same idempotency key: the existing ticket is returned. It is never downgraded, but a more
+  // severe repeat escalates it (see planDuplicate); `review` is then the review this call added.
+  | { duplicate: true; ticket: Ticket; review: Review | null; escalated: boolean };
+
+// Lower index = more severe.
+const severity = (p: Priority) => Priority.options.indexOf(p);
+
+export type DuplicatePlan = {
+  // Ticket fields to update, or null when the ticket stays as it is.
+  update: Pick<Ticket, "priority" | "hazards"> | null;
+  // Review to add for the existing ticket, or null.
+  review: Omit<NewReview, "ticketId"> | null;
+};
+
+// Pure decision for a repeated idempotency key, shared by every Repository implementation.
+// Deduplication must never swallow an escalation: if the repeat is more severe (e.g. the
+// model first missed the leak, then reported it), the ticket's priority goes up and the
+// review the policy now requires is added. A plain repeat writes nothing.
+export function planDuplicate(
+  existing: Ticket,
+  incoming: NewTicket,
+  review: Omit<NewReview, "ticketId"> | null,
+  existingHasReview: boolean,
+): DuplicatePlan {
+  const raised = severity(incoming.priority) < severity(existing.priority);
+  const hazards = [...new Set([...existing.hazards, ...incoming.hazards])];
+  const update = raised ? { priority: incoming.priority, hazards } : null;
+  const needsReview = review !== null && (raised || !existingHasReview);
+  return {
+    update,
+    review: needsReview
+      ? { ...review, reason: raised ? `escalated by a repeated report: ${review.reason}` : review.reason }
+      : null,
+  };
+}
 
 export interface Repository {
   getTenantContext(tenantId: string): Promise<TenantContext | null>;

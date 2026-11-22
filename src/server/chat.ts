@@ -32,6 +32,8 @@ export type ChatDeps = {
   // When set (public demo), requests must present it; failed attempts are limited per client.
   accessCode?: string;
   accessLimiter?: SlidingWindowLimiter;
+  // Run deadline. Below the route's maxDuration, so the run fails cleanly before the platform kills it.
+  timeoutMs?: number;
 };
 
 export type TicketSummary = {
@@ -60,7 +62,7 @@ export type ChatResponse =
         outcome: "completed" | "failed";
         reply: string;
         tickets: TicketSummary[];
-        // Tickets created by this message, so the portal can attach safety guidance.
+        // Tickets created or escalated by this message, so the portal can attach safety guidance.
         createdTicketIds: string[];
       };
     };
@@ -100,6 +102,9 @@ const FAILED_AFTER_TICKET =
 const FAILED_AFTER_REVIEW =
   "I couldn't finish my reply, but I've asked a person at the agency to look at this.";
 const FAILED_NOTHING_WRITTEN = "Sorry, something went wrong and nothing was changed. Please try again.";
+// A tool was still running at the deadline: its write may land after we answer.
+const FAILED_OUTCOME_UNKNOWN =
+  "Sorry, this took too long. Your request may still be recorded: check your tickets in a minute before sending it again.";
 
 export async function handleChat(
   input: unknown,
@@ -135,8 +140,7 @@ export async function handleChat(
         ? { role: "user" as const, content: turn.content }
         : { role: "assistant" as const, content: turn.content, toolCalls: [] },
     ),
-    // Below the route's maxDuration, so the run fails cleanly before the platform kills it.
-    timeoutMs: 50_000,
+    timeoutMs: deps.timeoutMs ?? 50_000,
     trace: { store: deps.traces, meta: { source: "portal", agencyId: tenant.agency.id } },
   });
 
@@ -151,7 +155,9 @@ export async function handleChat(
         ? FAILED_AFTER_TICKET
         : reviewInThisRun
           ? FAILED_AFTER_REVIEW
-          : FAILED_NOTHING_WRITTEN;
+          : result.error === "tool_timeout"
+            ? FAILED_OUTCOME_UNKNOWN
+            : FAILED_NOTHING_WRITTEN;
 
   return {
     status: 200,
@@ -160,7 +166,9 @@ export async function handleChat(
       outcome: result.status,
       reply,
       tickets: toTicketSummaries(tickets, reviews),
-      createdTicketIds: tickets.filter((t) => t.runId === result.runId).map((t) => t.id),
+      createdTicketIds: tickets
+        .filter((t) => t.runId === result.runId || reviews.some((r) => r.runId === result.runId && r.ticketId === t.id))
+        .map((t) => t.id),
     },
   };
 }

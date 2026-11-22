@@ -1,14 +1,15 @@
 import type postgres from "postgres";
 import { Policy } from "@/domain/policy";
-import type {
-  ActivePolicy,
-  CreateTicketResult,
-  NewReview,
-  NewTicket,
-  Repository,
-  Review,
-  TenantContext,
-  Ticket,
+import {
+  planDuplicate,
+  type ActivePolicy,
+  type CreateTicketResult,
+  type NewReview,
+  type NewTicket,
+  type Repository,
+  type Review,
+  type TenantContext,
+  type Ticket,
 } from "@/domain/repository";
 
 // PostgreSQL implementation. Atomicity and idempotency are enforced by the database:
@@ -94,9 +95,34 @@ export class PostgresRepository implements Repository {
         returning *
       `;
       if (!inserted) {
-        // A concurrent or earlier call with the same key won; return its ticket, write nothing.
-        const [existing] = await tx`select * from tickets where idempotency_key = ${t.idempotencyKey}`;
-        return { duplicate: true as const, ticket: toTicket(existing), review: null };
+        // A concurrent or earlier call with the same key won. Lock its ticket so concurrent
+        // repeats escalate it one at a time; a plain repeat writes nothing.
+        const [row] = await tx`select * from tickets where idempotency_key = ${t.idempotencyKey} for update`;
+        const existing = toTicket(row);
+        const [{ has_review }] = await tx`
+          select exists (select 1 from review_queue where ticket_id = ${existing.id}) as has_review
+        `;
+        const plan = planDuplicate(existing, t, review, has_review);
+        let ticket = existing;
+        if (plan.update) {
+          const [updated] = await tx`
+            update tickets set priority = ${plan.update.priority}, hazards = ${plan.update.hazards}::text[]
+            where id = ${existing.id}
+            returning *
+          `;
+          ticket = toTicket(updated);
+        }
+        let added: Review | null = null;
+        if (plan.review) {
+          const [reviewRow] = await tx`
+            insert into review_queue (run_id, agency_id, tenant_id, ticket_id, source, reason)
+            values (${plan.review.runId}, ${plan.review.agencyId}, ${plan.review.tenantId}, ${existing.id},
+                    ${plan.review.source}, ${plan.review.reason})
+            returning *
+          `;
+          added = toReview(reviewRow);
+        }
+        return { duplicate: true as const, ticket, review: added, escalated: plan.update !== null };
       }
 
       const ticket = toTicket(inserted);

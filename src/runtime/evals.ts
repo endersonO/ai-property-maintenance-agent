@@ -107,7 +107,7 @@ export type AgentEvalOutcome = {
 
 // Provider/network errors and timeouts only. Unusable model output (`incomplete_response`,
 // `empty_response`) and `max_steps_exceeded` are the model's outcomes and are scored.
-const INFRA_ERRORS = new Set(["model_error", "timeout", "trace_unavailable"]);
+const INFRA_ERRORS = new Set(["model_error", "timeout", "tool_timeout", "trace_unavailable"]);
 
 export async function runAgentEval<Deps>(
   workflow: WorkflowDefinition<Deps>,

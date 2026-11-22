@@ -9,6 +9,7 @@ import type {
   TenantContext,
   Ticket,
 } from "@/domain/repository";
+import { planDuplicate } from "@/domain/repository";
 import * as seed from "./seed-data";
 
 // In-memory implementation for evals and unit tests. Same contract as PostgresRepository.
@@ -55,7 +56,23 @@ export class InMemoryRepository implements Repository {
   ): Promise<CreateTicketResult> {
     const existingId = this.ticketsByKey.get(newTicket.idempotencyKey);
     if (existingId) {
-      return { duplicate: true, ticket: this.tickets.get(existingId)!, review: null };
+      const existing = this.tickets.get(existingId)!;
+      const hasReview = [...this.reviews.values()].some((r) => r.ticketId === existingId);
+      const plan = planDuplicate(existing, newTicket, newReview, hasReview);
+      const added: Review | null = plan.review && {
+        ...plan.review,
+        ticketId: existingId,
+        id: randomUUID(),
+        status: "pending",
+        createdAt: new Date(),
+      };
+      if (added && this.faults.has("review_insert")) {
+        throw new Error("Injected fault: review insert failed");
+      }
+      const ticket = plan.update ? { ...existing, ...plan.update } : existing;
+      this.tickets.set(existingId, ticket);
+      if (added) this.reviews.set(added.id, added);
+      return { duplicate: true, ticket, review: added, escalated: plan.update !== null };
     }
 
     // Build everything first, commit at the end: a fault leaves no partial state.

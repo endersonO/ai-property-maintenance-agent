@@ -6,13 +6,14 @@ import { InMemoryTraceStore } from "@/runtime/tracing";
 import { handleChat } from "./chat";
 import { SlidingWindowLimiter } from "./limits";
 
-function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinute?: number } = {}) {
+function setup(script: ScriptStep[], options: { accessCode?: string; maxPerMinute?: number; timeoutMs?: number } = {}) {
   const deps = {
     repo: new InMemoryRepository(),
     traces: new InMemoryTraceStore(),
     model: new ScriptedModel(script),
     limiter: new SlidingWindowLimiter(options.maxPerMinute ?? 100, 60_000),
     accessCode: options.accessCode,
+    timeoutMs: options.timeoutMs,
   };
   const send = (body: Record<string, unknown>, accessCode: string | null = null) =>
     handleChat({ tenantId: "tenant_olivia", requestId: randomUUID(), message: "Water is leaking", ...body }, deps, {
@@ -74,6 +75,40 @@ describe("handleChat", () => {
 
     expect(res.status === 200 && res.body.outcome).toBe("failed");
     expect(res.status === 200 && res.body.reply).toMatch(/asked a person at the agency/);
+  });
+
+  it("shows safety guidance when a retry escalates the ticket created by an earlier run", async () => {
+    const routine: ScriptStep = {
+      toolCalls: [
+        {
+          name: "create_maintenance_ticket",
+          args: { ...(createLeak.toolCalls![0].args as Record<string, unknown>), hazards: [] },
+        },
+      ],
+    };
+    const { send } = setup([routine, { text: "Ticket created." }, createLeak, { text: "Now an emergency." }]);
+    const requestId = randomUUID();
+    const first = await send({ requestId });
+    // Retry of the same request (e.g. the response was lost); this time the leak is reported.
+    const retry = await send({ requestId });
+
+    if (first.status !== 200 || retry.status !== 200) throw new Error("expected 200");
+    expect(first.body.tickets[0].priority).toBe("normal");
+    expect(retry.body.tickets).toHaveLength(1);
+    expect(retry.body.tickets[0]).toMatchObject({ priority: "emergency", review: expect.any(String) });
+    expect(retry.body.createdTicketIds).toEqual([retry.body.tickets[0].id]);
+  });
+
+  it("does not say nothing changed when a tool is cut off at the deadline", async () => {
+    const { deps, send } = setup([getContext, createLeak, { text: "never" }], { timeoutMs: 50 });
+    // The write hangs past the deadline: it may still land later.
+    deps.repo.createTicketWithReview = () => new Promise(() => {});
+    const res = await send({});
+
+    if (res.status !== 200) throw new Error("expected 200");
+    expect(res.body.outcome).toBe("failed");
+    expect(res.body.reply).toMatch(/may still be recorded/);
+    expect(res.body.reply).not.toMatch(/nothing was changed/);
   });
 
   it("says nothing was changed when the run fails before any write", async () => {

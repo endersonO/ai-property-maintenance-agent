@@ -188,7 +188,29 @@ export async function runAgent<Deps>(input: RunInput<Deps>): Promise<RunResult> 
     }
 
     for (const call of response.toolCalls) {
-      const outcome = await executeToolCall(workflow.tools, call, ctx);
+      // No tool starts after the deadline: a late write is worse than no write.
+      if (Date.now() >= deadline) return finish("failed", null, "timeout");
+      let outcome: Awaited<ReturnType<typeof executeToolCall>>;
+      const toolStartedAt = performance.now();
+      try {
+        outcome = await withDeadline(executeToolCall(workflow.tools, call, ctx), deadline);
+      } catch {
+        // A hung tool must not hold the run. It may still finish its write in the
+        // background, so the caller is told the outcome is unknown ("tool_timeout"),
+        // not that nothing happened.
+        events.push({
+          seq: events.length + 1,
+          type: "tool_call",
+          toolName: call.name,
+          stage: "execute",
+          status: "error",
+          durationMs: Math.round(performance.now() - toolStartedAt),
+          args: call.args,
+          result: { ok: false, stage: "execute", code: "timeout", message: `The ${call.name} tool timed out.` },
+          internalError: "deadline reached while the tool was running",
+        });
+        return finish("failed", null, "tool_timeout");
+      }
       events.push({
         seq: events.length + 1,
         type: "tool_call",

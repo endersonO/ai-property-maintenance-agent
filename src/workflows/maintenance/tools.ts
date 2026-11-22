@@ -71,7 +71,8 @@ export const createMaintenanceTicket = defineTool<AppDeps, CreateTicketInput, Ti
       agencyId: agency.id,
     };
   },
-  // Dedupes retries of the same request; separate requests never merge.
+  // Dedupes retries of the same request; separate requests never merge. A more severe
+  // repeat escalates the existing ticket instead of being swallowed (planDuplicate).
   idempotencyKey: (ctx, args) =>
     createHash("sha256").update(`${ctx.requestId}|${args.property_id}|${args.category}`).digest("hex"),
   execute: async (ctx, args, { policy, idempotencyKey }) => {
@@ -105,10 +106,11 @@ export const createMaintenanceTicket = defineTool<AppDeps, CreateTicketInput, Ti
     return {
       ticket_id: ticket.id,
       duplicate: result.duplicate,
+      escalated: result.duplicate ? result.escalated : undefined,
       priority: ticket.priority,
       status: ticket.status,
       estimated_cost_gbp: ticket.estimatedCostGbp,
-      sent_to_human_review: result.duplicate ? undefined : result.review !== null,
+      sent_to_human_review: result.review !== null ? true : result.duplicate ? undefined : false,
     };
   },
 });

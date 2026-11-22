@@ -4,7 +4,14 @@ import type { AnyTool } from "./types";
 // Model port: the runtime only needs "given the conversation and the tools, what next?".
 // Implementations: ScriptedModel (evals, CI) and provider adapters (demo, agent evals).
 
-export type ToolCall = { id: string; name: string; args: unknown };
+export type ToolCall = {
+  id: string;
+  name: string;
+  args: unknown;
+  // Opaque provider data that must be sent back unchanged on the next turn
+  // (e.g. Gemini's thought signatures). The runtime stores it, never reads it.
+  providerData?: unknown;
+};
 
 export type Message =
   | { role: "system"; content: string }

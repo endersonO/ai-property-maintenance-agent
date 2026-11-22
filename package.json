@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "db:reset": "set -a && . ./.env.local && db/reset.sh",
-    "evals": "tsx evals/run.ts"
+    "evals": "tsx evals/run.ts",
+    "try": "tsx scripts/try-agent.ts"
   },
   "dependencies": {
     "next": "16.4.6",

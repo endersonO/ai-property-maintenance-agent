@@ -5,6 +5,15 @@ const UNITS: Record<string, number> = { h: 3_600_000, d: 86_400_000 };
 // Default 7d. A bare `--since` is an error, never "everything": an incomplete command must
 // not widen the window.
 export function sinceArg(args: string[]): string {
+  // Both `--since 24h` and `--since=24h`; anything else starting with --since is rejected.
+  const inline = args.find((a) => a.startsWith("--since="));
+  if (inline !== undefined) {
+    const value = inline.slice("--since=".length);
+    if (!value) throw new Error("--since needs a value: 24h, 7d or all");
+    return value;
+  }
+  const unknown = args.find((a) => a.startsWith("--since") && a !== "--since");
+  if (unknown) throw new Error(`Unknown option ${unknown}; use --since 24h or --since=24h`);
   if (!args.includes("--since")) return "7d";
   const value = args[args.indexOf("--since") + 1];
   if (!value || value.startsWith("--")) throw new Error("--since needs a value: 24h, 7d or all");

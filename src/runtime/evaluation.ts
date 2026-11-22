@@ -68,16 +68,26 @@ export function evaluateRun(run: EvaluableRun, evaluators: Evaluator[]): Evaluat
   });
 }
 
-// Persistence port for verdicts. Saving is an upsert on (run, evaluator, version).
+// Persistence port for verdicts, keyed by (run, evaluator, version). A stored verdict is final
+// unless it is `error`: saving never overwrites pass / fail / n/a, so concurrent or repeated
+// evaluations can't rewrite a valid result. Returns the verdicts actually written.
 export interface EvaluationStore {
-  save(evaluations: Evaluation[]): Promise<void>;
+  save(evaluations: Evaluation[]): Promise<Evaluation[]>;
 }
 
 export class InMemoryEvaluationStore implements EvaluationStore {
   readonly rows = new Map<string, Evaluation>();
 
   async save(evaluations: Evaluation[]) {
-    for (const e of evaluations) this.rows.set(`${e.runId}|${e.evaluatorId}|${e.evaluatorVersion}`, e);
+    const written: Evaluation[] = [];
+    for (const e of evaluations) {
+      const key = `${e.runId}|${e.evaluatorId}|${e.evaluatorVersion}`;
+      const stored = this.rows.get(key);
+      if (stored && stored.verdict !== "error") continue;
+      this.rows.set(key, e);
+      written.push(e);
+    }
+    return written;
   }
 }
 

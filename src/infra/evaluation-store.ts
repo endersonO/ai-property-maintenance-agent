@@ -53,22 +53,24 @@ export class PostgresEvaluationStore implements EvaluationStore {
     private readonly options: { timeoutMs?: number } = {},
   ) {}
 
-  // Upsert: a retry replaces an earlier `error` (or an identical verdict) for the same version.
-  async save(evaluations: Evaluation[]): Promise<void> {
-    if (evaluations.length === 0) return;
-    await this.sql.begin(async (tx) => {
+  // Insert, or replace a stored `error` only. The condition lives in the write itself, so two
+  // concurrent evaluations of the same pair can't overwrite a valid verdict (or its timestamp):
+  // the loser's row is simply not written, and not counted.
+  async save(evaluations: Evaluation[]): Promise<Evaluation[]> {
+    if (evaluations.length === 0) return [];
+    return this.sql.begin(async (tx) => {
       const timeoutMs = this.options.timeoutMs;
       if (timeoutMs !== undefined) {
         const ms = Math.max(1, Math.floor(timeoutMs));
         // SET does not take bind parameters; ms is a validated integer.
         await tx.unsafe(`set local statement_timeout = ${ms}; set local lock_timeout = ${ms}`);
       }
-      await this.insert(tx, evaluations);
-    });
+      return this.insert(tx, evaluations);
+    }) as Promise<Evaluation[]>;
   }
 
-  private async insert(tx: postgres.TransactionSql, evaluations: Evaluation[]) {
-    await tx`
+  private async insert(tx: postgres.TransactionSql, evaluations: Evaluation[]): Promise<Evaluation[]> {
+    const rows = await tx`
       insert into run_evaluations ${tx(
         evaluations.map((e) => ({
           run_id: e.runId,
@@ -80,35 +82,41 @@ export class PostgresEvaluationStore implements EvaluationStore {
       )}
       on conflict (run_id, evaluator_id, evaluator_version)
       do update set verdict = excluded.verdict, evidence = excluded.evidence, evaluated_at = now()
+      where run_evaluations.verdict = 'error'
+      returning run_id, evaluator_id, evaluator_version
     `;
+    const written = new Set(rows.map((r) => `${r.run_id}|${r.evaluator_id}|${r.evaluator_version}`));
+    return evaluations.filter((e) => written.has(`${e.runId}|${e.evaluatorId}|${e.evaluatorVersion}`));
   }
 }
 
-// Finished runs still missing a usable verdict for some current evaluator version: never
-// evaluated (online hook skipped or failed), evaluated by an older version, or `error`.
+// Finished runs still missing a usable verdict, with exactly which current evaluators they
+// need: never evaluated (online hook skipped or failed), evaluated by an older version, or
+// `error`. Only those pairs are re-run, so a valid verdict is never rewritten by a retry.
+export type PendingRun = { runId: string; evaluatorIds: string[] };
+
 export async function runsPendingEvaluation(
   sql: postgres.Sql,
   evaluators: Pick<Evaluator, "id" | "version">[],
   since: Date | null,
-): Promise<string[]> {
+): Promise<PendingRun[]> {
   const ids = evaluators.map((e) => e.id);
   const versions = evaluators.map((e) => e.version);
   const rows = await sql`
-    select r.id
+    select r.id, array_agg(e.id order by e.id) as evaluator_ids
     from runs r
+    cross join unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
     where r.status <> 'running'
       and (${since}::timestamptz is null or r.created_at >= ${since}::timestamptz)
-      and exists (
-        select 1 from unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
-        where not exists (
-          select 1 from run_evaluations v
-          where v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
-            and v.verdict <> 'error'
-        )
+      and not exists (
+        select 1 from run_evaluations v
+        where v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+          and v.verdict <> 'error'
       )
+    group by r.id, r.created_at
     order by r.created_at
   `;
-  return rows.map((r) => r.id as string);
+  return rows.map((r) => ({ runId: r.id as string, evaluatorIds: r.evaluator_ids as string[] }));
 }
 
 export type BackfillReport = { runs: number; verdicts: Record<Evaluation["verdict"], number> };
@@ -122,13 +130,14 @@ export async function backfillEvaluations(
 ): Promise<BackfillReport> {
   const store = new PostgresEvaluationStore(sql);
   const report: BackfillReport = { runs: 0, verdicts: { pass: 0, fail: 0, "n/a": 0, error: 0 } };
-  for (const runId of await runsPendingEvaluation(sql, evaluators, since)) {
+  for (const { runId, evaluatorIds } of await runsPendingEvaluation(sql, evaluators, since)) {
     const run = await loadEvaluableRun(sql, runId);
     if (!run) continue;
-    const verdicts = evaluateRun(run, evaluators);
-    await store.save(verdicts);
+    const written = await store.save(evaluateRun(run, evaluators.filter((e) => evaluatorIds.includes(e.id))));
+    // Only what this call actually wrote: a concurrent backfill that got there first counts it.
+    if (written.length === 0) continue;
     report.runs++;
-    for (const v of verdicts) report.verdicts[v.verdict]++;
+    for (const v of written) report.verdicts[v.verdict]++;
   }
   return report;
 }

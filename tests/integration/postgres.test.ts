@@ -14,6 +14,9 @@ import {
 } from "@/infra/evaluation-store";
 import { evaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
+
+const pendingIds = async (...args: Parameters<typeof runsPendingEvaluation>) =>
+  (await runsPendingEvaluation(...args)).map((p) => p.runId);
 import * as seed from "@/infra/seed-data";
 import { ScriptedModel } from "@/runtime/model";
 import { runAgent } from "@/runtime/orchestrator";
@@ -253,13 +256,13 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
     it("backfill evaluates runs missed online, then has nothing left to do", async () => {
       const run = await leakRun();
-      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
+      expect(await pendingIds(sql, evaluators, null)).toEqual([run.runId]);
 
       expect(await backfillEvaluations(sql, evaluators, null)).toEqual({
         runs: 1,
         verdicts: { pass: 2, fail: 0, "n/a": 0, error: 0 },
       });
-      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([]);
+      expect(await pendingIds(sql, evaluators, null)).toEqual([]);
       expect((await backfillEvaluations(sql, evaluators, null)).runs).toBe(0);
     });
 
@@ -281,17 +284,17 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       const run = await leakRun();
       const store = new PostgresEvaluationStore(sql);
       await store.save(evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators));
-      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([]);
+      expect(await pendingIds(sql, evaluators, null)).toEqual([]);
 
       // An error verdict is not a result: the run is pending again.
       await sql`update run_evaluations set verdict = 'error' where evaluator_id = 'hazard_logged'`;
-      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
+      expect(await pendingIds(sql, evaluators, null)).toEqual([run.runId]);
       await backfillEvaluations(sql, evaluators, null);
       expect((await stored()).map((r) => r.verdict)).toEqual(["pass", "pass"]);
 
       // A new version of an evaluator: old verdicts stay, the run needs the new one.
       const bumped = evaluators.map((e) => (e.id === "hazard_logged" ? { ...e, version: e.version + 1 } : e));
-      expect(await runsPendingEvaluation(sql, bumped, null)).toEqual([run.runId]);
+      expect(await pendingIds(sql, bumped, null)).toEqual([run.runId]);
       await backfillEvaluations(sql, bumped, null);
       expect((await stored()).map((r) => [r.evaluator_id, r.evaluator_version])).toEqual([
         ["emergency_reviewed", 1],
@@ -300,13 +303,56 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       ]);
     });
 
-    it("saving the same verdicts twice keeps one row each", async () => {
+    it("retrying one evaluator's error leaves the other evaluators' verdicts untouched", async () => {
+      const run = await leakRun();
+      await backfillEvaluations(sql, evaluators, null);
+      await sql`update run_evaluations set verdict = 'error', evaluated_at = '2026-01-01' where evaluator_id = 'hazard_logged'`;
+      await sql`update run_evaluations set evaluated_at = '2026-01-01' where evaluator_id = 'emergency_reviewed'`;
+
+      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([{ runId: run.runId, evaluatorIds: ["hazard_logged"] }]);
+      expect(await backfillEvaluations(sql, evaluators, null)).toEqual({
+        runs: 1,
+        verdicts: { pass: 1, fail: 0, "n/a": 0, error: 0 },
+      });
+      const rows = await sql`
+        select evaluator_id, verdict, evaluated_at < '2026-01-02' as untouched
+        from run_evaluations order by evaluator_id
+      `;
+      expect(rows.map((r) => [r.evaluator_id, r.verdict, r.untouched])).toEqual([
+        ["emergency_reviewed", "pass", true],
+        ["hazard_logged", "pass", false],
+      ]);
+    });
+
+    it("a stored valid verdict is never overwritten; only an error is replaced", async () => {
       const run = await leakRun();
       const verdicts = evaluateRun((await loadEvaluableRun(sql, run.runId))!, evaluators);
       const store = new PostgresEvaluationStore(sql);
-      await store.save(verdicts);
-      await store.save(verdicts);
-      expect(await stored()).toHaveLength(2);
+      expect(await store.save(verdicts)).toHaveLength(2);
+      await sql`update run_evaluations set evaluated_at = '2026-01-01'`;
+      await sql`update run_evaluations set verdict = 'error' where evaluator_id = 'hazard_logged'`;
+
+      // Same pairs written again (e.g. by a concurrent backfill): only the error is replaced.
+      const written = await store.save(verdicts);
+      expect(written.map((v) => v.evaluatorId)).toEqual(["hazard_logged"]);
+      const rows = await sql`select evaluator_id, verdict, evaluated_at < '2026-01-02' as untouched from run_evaluations order by evaluator_id`;
+      expect(rows.map((r) => [r.evaluator_id, r.verdict, r.untouched])).toEqual([
+        ["emergency_reviewed", "pass", true],
+        ["hazard_logged", "pass", false],
+      ]);
+      expect(await store.save(verdicts)).toEqual([]);
+    });
+
+    it("two concurrent backfills write and count each verdict once", async () => {
+      await leakRun();
+      await leakRun();
+      const reports = await Promise.all([
+        backfillEvaluations(sql, evaluators, null),
+        backfillEvaluations(sql, evaluators, null),
+      ]);
+      const counted = reports.reduce((n, r) => n + Object.values(r.verdicts).reduce((a, b) => a + b, 0), 0);
+      expect(counted).toBe(4);
+      expect(await stored()).toHaveLength(4);
     });
 
     it("the quality panel counts an unevaluated run as pending, never as a pass", async () => {
@@ -372,8 +418,8 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
     it("only considers runs inside the --since window", async () => {
       const run = await leakRun();
       await sql`update runs set created_at = now() - interval '10 days' where id = ${run.runId}`;
-      expect(await runsPendingEvaluation(sql, evaluators, new Date(Date.now() - 7 * 86_400_000))).toEqual([]);
-      expect(await runsPendingEvaluation(sql, evaluators, null)).toEqual([run.runId]);
+      expect(await pendingIds(sql, evaluators, new Date(Date.now() - 7 * 86_400_000))).toEqual([]);
+      expect(await pendingIds(sql, evaluators, null)).toEqual([run.runId]);
     });
   });
 });

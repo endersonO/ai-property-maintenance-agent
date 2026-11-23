@@ -10,7 +10,7 @@ import { checkAccess } from "@/server/access";
 import { clientKey } from "@/server/http";
 import { AccessForm } from "../access-form";
 import { Icon, PriorityBadge } from "../ui";
-import { BriefBox } from "./brief-box";
+import { AskBox } from "../ask-box";
 import { lastTwelveMonthKeys } from "@/operations/periods";
 import { statistic } from "./figures";
 import { TrendChart, type TrendSeries } from "./trend-chart";
@@ -385,9 +385,14 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
         </p>
       )}
 
-      <BriefBox
+      <AskBox
         key={managerId}
-        managerId={managerId}
+        id="brief"
+        endpoint="/api/operations-brief"
+        payload={{ managerId }}
+        heading="Ask the operations brief"
+        description="The agent reads the same figures as this page through read-only tools; every number it writes cites its source."
+        placeholder="How did reports trend last quarter?"
         accessCode={typeof code === "string" ? code : null}
         examples={["How many emergencies are open?", "How did reports trend last quarter?", "Which agency is slowest on emergencies?"]}
       />

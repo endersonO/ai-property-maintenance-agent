@@ -10,6 +10,8 @@ import { ticketStatusWorkflow } from "@/workflows/ticket-status";
 import { ticketStatusAgentEvals, ticketStatusEvals } from "@/workflows/ticket-status/evals";
 import { operationsBriefWorkflow } from "@/workflows/operations-brief";
 import { makeOpsDeps, operationsBriefEvals } from "@/workflows/operations-brief/evals";
+import { qualityAnalystWorkflow } from "@/workflows/quality-analyst";
+import { makeQualityDeps, qualityAnalystEvals } from "@/workflows/quality-analyst/evals";
 
 // `pnpm evals`                 executor evals (scripted model). Non-zero exit on failure: gates CI.
 // `pnpm evals --layer agent`   agent evals (real model, pass rates). Reported, never gating.
@@ -81,6 +83,19 @@ async function runExecutorLayer() {
   console.log(`\nExecutor evals — ${operationsBriefWorkflow.id}\n`);
   for (const evalCase of operationsBriefEvals) {
     const outcome = await runExecutorEval(operationsBriefWorkflow, evalCase, makeOpsDeps, evaluators);
+    horizontal.push(...outcome.evaluations);
+    total++;
+    console.log(`  ${outcome.pass ? "PASS" : "FAIL"}  ${outcome.id.padEnd(4)} ${outcome.title}`);
+    if (!outcome.pass) {
+      failed++;
+      for (const failure of outcome.failures) console.log(`      ✗ ${failure}`);
+      outcome.results.forEach(printTrace);
+    }
+  }
+  // The Inspector's assistant too: its deps are the Inspector's data, read-only.
+  console.log(`\nExecutor evals — ${qualityAnalystWorkflow.id}\n`);
+  for (const evalCase of qualityAnalystEvals) {
+    const outcome = await runExecutorEval(qualityAnalystWorkflow, evalCase, makeQualityDeps, evaluators);
     horizontal.push(...outcome.evaluations);
     total++;
     console.log(`  ${outcome.pass ? "PASS" : "FAIL"}  ${outcome.id.padEnd(4)} ${outcome.title}`);

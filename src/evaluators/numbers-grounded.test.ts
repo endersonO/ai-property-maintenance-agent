@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkGrounding } from "./numbers-grounded";
+import type { EvaluableRun } from "@/runtime/evaluation";
+import { checkGrounding, numbersGrounded } from "./numbers-grounded";
 
 const facts = new Map(
   [
@@ -154,5 +155,60 @@ describe("numbers_grounded", () => {
     expect(checkGrounding(reply.replace("but down 19.5%", "and up 19.5%"), real).map((p) => p.problem)).toEqual([
       "19.5 does not match [change_vs_same_period_last_year.agency_northbridge.2026-Q3] = -19.5",
     ]);
+  });
+
+  it("ignores full ids, and short refs only when the tools returned that id", () => {
+    const runFacts = new Map([["runs_flagged_by_alarm", { key: "runs_flagged_by_alarm", agency: "all runs", value: 2 }]]);
+    const refs = { refs: new Set(["12345678"]), toolText: "" };
+    const reply =
+      "2 runs were flagged by an alarm [runs_flagged_by_alarm]: run 3f2a9c1b-1234-4000-8000-000000000001 and run 12345678.";
+    expect(checkGrounding(reply, runFacts, refs).map((p) => p.problem)).toEqual([]);
+    // A real uncited figure next to them is still caught.
+    expect(checkGrounding(`${reply} It took 3 tool calls.`, runFacts, refs).map((p) => p.problem)).toEqual([
+      "3 is not followed by a citation",
+    ]);
+    // An eight-digit number that is no known ref is a figure.
+    expect(checkGrounding("There were 12345678 runs.", runFacts).map((p) => p.problem)).toEqual([
+      "12345678 is not followed by a citation",
+    ]);
+  });
+
+  it("accepts a figure quoted in backticks only when the tools returned that exact text", () => {
+    const flagged = new Map([["runs_flagged_by_alarm", { key: "runs_flagged_by_alarm", agency: "all runs", value: 1 }]]);
+    const context = { refs: new Set(["852ed86b"]), toolText: '{"evidence_untrusted":"25 is not followed by a citation"}' };
+    const reply =
+      "1 run was flagged [runs_flagged_by_alarm]: run 852ed86b [852ed86b], because `25 is not followed by a citation`.";
+    expect(checkGrounding(reply, flagged, context).map((p) => p.problem)).toEqual([]);
+    // An invented quotation, or a figure outside the quote, is still a claim.
+    expect(checkGrounding(reply.replace("`25 is", "`26 is"), flagged, context).map((p) => p.problem)).toEqual([
+      "26 is not followed by a citation",
+    ]);
+    expect(checkGrounding(`${reply} It took 4 attempts.`, flagged, context).map((p) => p.problem)).toEqual([
+      "4 is not followed by a citation",
+    ]);
+    // An unknown bracketed ref is still an unknown citation.
+    expect(checkGrounding("1 run [deadbee1].", flagged, context).map((p) => p.problem)).toEqual([
+      "cites [deadbee1], which no tool returned",
+    ]);
+  });
+
+  it("an uncited eight-digit figure makes the run applicable and fails it; a known run ref doesn't", () => {
+    const run = (output: string, ids: string[] = []) =>
+      ({
+        workflowId: "quality-analyst",
+        output,
+        toolCalls: [{ name: "list_runs", args: {}, result: { ok: true, data: { runs: ids.map((run_id) => ({ run_id })) } } }],
+      }) as unknown as EvaluableRun;
+    const uncited = run("There were 12345678 runs.");
+    expect(numbersGrounded.appliesTo(uncited)).toBe(true);
+    expect(numbersGrounded.evaluate(uncited)).toMatchObject({ verdict: "fail" });
+    expect(numbersGrounded.appliesTo(run("Open run 12345678 to see why.", ["12345678-0000-4000-8000-000000000001"]))).toBe(false);
+  });
+
+  it("applies to the Inspector's assistant as well as the operations brief, and nothing else", () => {
+    const run = (workflowId: string) => ({ workflowId, output: "2 runs [runs_flagged_by_alarm]", toolCalls: [] }) as unknown as EvaluableRun;
+    expect(numbersGrounded.appliesTo(run("quality-analyst"))).toBe(true);
+    expect(numbersGrounded.appliesTo(run("operations-brief"))).toBe(true);
+    expect(numbersGrounded.appliesTo(run("maintenance"))).toBe(false);
   });
 });

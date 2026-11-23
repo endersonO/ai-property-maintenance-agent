@@ -89,11 +89,12 @@ export async function listRuns(
     limit?: number;
     evaluators?: { id: string; version: number; kind?: "invariant" | "monitor" }[];
     failing?: string | null;
+    workflowId?: string | null;
   } = {},
 ): Promise<
   (RunRow & { checks: RunChecks; outcome: RunOutcome; actorName: string | null; asked: string | null; totalMatching: number })[]
 > {
-  const { limit = 50, evaluators = [], failing = null } = options;
+  const { limit = 50, evaluators = [], failing = null, workflowId = null } = options;
   const ids = evaluators.map((e) => e.id);
   const versions = evaluators.map((e) => e.version);
   const kinds = evaluators.map((e) => e.kind ?? "monitor");
@@ -132,7 +133,8 @@ export async function listRuns(
     -- failing narrows the list to exactly the sets the Inspector counts (see qualitySummary):
     --   rules  = a rule failed; alarms = an alarm failed and no rule did; errors = a check
     --   couldn't run; any = any of those; otherwise one evaluator id (failed or couldn't run).
-    where ${failing}::text is null or (
+    where (${workflowId}::text is null or r.workflow_id = ${workflowId}::text)
+      and (${failing}::text is null or (
       with mine as (
         select e.id, e.kind, v.verdict
         from unnest(${ids}::text[], ${versions}::int[], ${kinds}::text[]) as e(id, version, kind)
@@ -151,7 +153,7 @@ export async function listRuns(
             and (${failingVerdict ?? null}::text is null and verdict in ('fail', 'error') or verdict = ${failingVerdict ?? null}::text)
         )
       end
-    )
+    ))
     order by r.created_at desc
     limit ${limit}
   `;

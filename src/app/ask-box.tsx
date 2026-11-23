@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { historyFrom } from "./ask-history";
 
-// Ask the operations brief. The reply's citations ([fact_key]) are shown as small markers with the
-// key on hover/focus, so the text stays readable while every figure stays traceable.
+// Ask a read-only agent about the page it sits on: the operations brief (managers) or the
+// Inspector's quality analyst (engineers). The reply's citations ([fact_key]) are shown as small
+// markers with the key on hover/focus, so the text stays readable while every figure stays traceable.
 
 type Answer = { question: string; reply: string; runId?: string; failed: boolean };
 
@@ -26,7 +28,27 @@ function WithCitations({ text }: { text: string }) {
   );
 }
 
-export function BriefBox({ managerId, accessCode, examples }: { managerId: string; accessCode: string | null; examples: string[] }) {
+export function AskBox({
+  id,
+  endpoint,
+  payload = {},
+  heading,
+  description,
+  placeholder,
+  examples,
+  accessCode,
+}: {
+  // Prefix for element ids, so two boxes never share one.
+  id: string;
+  endpoint: "/api/operations-brief" | "/api/quality-assistant";
+  // Extra request fields (e.g. the simulated manager session).
+  payload?: Record<string, string>;
+  heading: string;
+  description: string;
+  placeholder: string;
+  examples: string[];
+  accessCode: string | null;
+}) {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [answers, setAnswers] = useState<Answer[]>([]);
@@ -39,10 +61,11 @@ export function BriefBox({ managerId, accessCode, examples }: { managerId: strin
     if (!question || pending) return;
     setPending(true);
     try {
-      const res = await fetch("/api/operations-brief", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json", ...(accessCode && { "x-demo-access-code": accessCode }) },
-        body: JSON.stringify({ managerId, requestId: crypto.randomUUID(), message: question }),
+        // Earlier turns go with the question, so a follow-up keeps its context.
+        body: JSON.stringify({ ...payload, requestId: crypto.randomUUID(), message: question, history: historyFrom(answers) }),
       });
       const body = await res.json();
       setAnswers((a) => [
@@ -56,7 +79,7 @@ export function BriefBox({ managerId, accessCode, examples }: { managerId: strin
       ]);
       if (res.ok) setDraft("");
     } catch {
-      setAnswers((a) => [{ question, reply: "The brief couldn't be reached. Nothing was changed.", failed: true }, ...a]);
+      setAnswers((a) => [{ question, reply: "The assistant couldn't be reached. Nothing was changed.", failed: true }, ...a]);
     } finally {
       setPending(false);
     }
@@ -71,28 +94,26 @@ export function BriefBox({ managerId, accessCode, examples }: { managerId: strin
   }
 
   return (
-    <section aria-labelledby="brief-heading" className="space-y-3 rounded-lg border border-border bg-surface p-4 shadow-panel">
+    <section aria-labelledby={`${id}-heading`} className="space-y-3 rounded-lg border border-border bg-surface p-4 shadow-panel">
       <div>
-        <h2 id="brief-heading" className="text-title font-semibold">
-          Ask the operations brief
+        <h2 id={`${id}-heading`} className="text-title font-semibold">
+          {heading}
         </h2>
-        <p className="text-body-sm text-muted">
-          The agent reads the same figures as this page through read-only tools; every number it writes cites its source.
-        </p>
+        <p className="text-body-sm text-muted">{description}</p>
       </div>
       <form ref={formRef} onSubmit={onSubmit} aria-busy={pending} className="space-y-2">
-        <label htmlFor="brief-question" className="sr-only">
+        <label htmlFor={`${id}-question`} className="sr-only">
           Question
         </label>
         <textarea
-          id="brief-question"
+          id={`${id}-question`}
           rows={2}
           maxLength={1000}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={pending}
-          placeholder="How did reports trend last quarter?"
+          placeholder={placeholder}
           className="w-full resize-none rounded-md border border-border-strong bg-surface px-3 py-2 text-body disabled:opacity-50"
         />
         <div className="flex flex-wrap items-center gap-2">

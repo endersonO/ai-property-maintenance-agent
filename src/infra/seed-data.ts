@@ -85,12 +85,14 @@ export const properties = [
   { id: "prop_mcr_1", agencyId: "agency_northbridge", address: "Flat 4, 18 Mill Lane", city: "Manchester", postcode: "M4 6AB" },
   { id: "prop_lds_1", agencyId: "agency_northbridge", address: "27 Kirkgate Row", city: "Leeds", postcode: "LS2 7DJ" },
   { id: "prop_bri_1", agencyId: "agency_harbour_lane", address: "Flat 2, 9 Quayside Court", city: "Bristol", postcode: "BS1 4RT" },
+  { id: "prop_shf_1", agencyId: "agency_riverside", address: "12 Weir View Terrace", city: "Sheffield", postcode: "S3 8QT" },
 ];
 
 export const tenants = [
   { id: "tenant_olivia", name: "Olivia Bennett", email: "olivia.bennett@example.com", propertyId: "prop_mcr_1" },
   { id: "tenant_james", name: "James Okafor", email: "james.okafor@example.com", propertyId: "prop_lds_1" },
   { id: "tenant_priya", name: "Priya Shah", email: "priya.shah@example.com", propertyId: "prop_bri_1" },
+  { id: "tenant_daniel", name: "Daniel Hughes", email: "daniel.hughes@example.com", propertyId: "prop_shf_1" },
 ];
 
 export const managers = [

@@ -7,6 +7,8 @@ import { maintenanceWorkflow } from ".";
 import { maintenanceEvals, makeEvalDeps } from "./evals";
 import { operationsBriefWorkflow } from "../operations-brief";
 import { makeOpsDeps, operationsBriefEvals } from "../operations-brief/evals";
+import { qualityAnalystWorkflow } from "../quality-analyst";
+import { makeQualityDeps, qualityAnalystEvals } from "../quality-analyst/evals";
 
 // Runs the executor evals inside `pnpm test` too, so a regression fails the normal test run.
 // The horizontal evaluators run on every eval run: a broken invariant fails the case.
@@ -29,5 +31,21 @@ describe("operations-brief executor evals", () => {
   it.each(operationsBriefEvals.map((c) => [c.id, c] as const))("%s", async (_id, evalCase) => {
     const outcome = await runExecutorEval(operationsBriefWorkflow, evalCase, makeOpsDeps, evaluators);
     expect(outcome.failures).toEqual([]);
+  });
+});
+
+describe("quality-analyst executor evals", () => {
+  it.each(qualityAnalystEvals.map((c) => [c.id, c] as const))("%s", async (_id, evalCase) => {
+    const outcome = await runExecutorEval(qualityAnalystWorkflow, evalCase, makeQualityDeps, evaluators);
+    expect(outcome.failures).toEqual([]);
+    // Its scripted answers cite every figure correctly: no check may fail on them, alarms included.
+    expect(outcome.evaluations.filter((v) => v.verdict === "fail" || v.verdict === "error")).toEqual([]);
+  });
+
+  // Cited answers are actually checked by numbers_grounded (not skipped as n/a).
+  it.each(["E18", "E23"])("%s's cited answer passes numbers_grounded", async (id) => {
+    const evalCase = qualityAnalystEvals.find((c) => c.id === id)!;
+    const outcome = await runExecutorEval(qualityAnalystWorkflow, evalCase, makeQualityDeps, evaluators);
+    expect(outcome.evaluations.find((v) => v.evaluatorId === "numbers_grounded")?.verdict).toBe("pass");
   });
 });

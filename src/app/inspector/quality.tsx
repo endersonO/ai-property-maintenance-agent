@@ -1,19 +1,13 @@
 import Link from "next/link";
 import type { QualityRow, QualitySummary } from "@/infra/inspector-queries";
+import { CHECK_COPY } from "@/evaluators/check-copy";
 import type { Evaluator } from "@/runtime/evaluation";
 import { Icon } from "../ui";
 
 // The platform view's first question — "is the agent behaving?" — answered in plain language:
 // a status line, then one compact row per check. Per-agency detail is folded away.
 
-// What each check means to a reader who doesn't know its id.
-const CHECKS: Record<string, { title: string; protects: string }> = {
-  emergency_reviewed: { title: "Emergencies reach a person", protects: "No emergency is left without human review." },
-  no_foreign_ids: { title: "No other tenant's data", protects: "Replies never show a ticket that isn't the tenant's." },
-  hazard_logged: { title: "Dangers become tickets", protects: "A gas smell or a leak is logged, not just answered." },
-  claims_match_actions: { title: "No invented success", protects: "“Ticket created” is only said when one was created." },
-  numbers_grounded: { title: "Figures match their source", protects: "Every number in a manager's brief comes from the data." },
-};
+const CHECKS = CHECK_COPY;
 
 type Totals = { eligible: number; pass: number; fail: number; notApplicable: number; error: number; pending: number };
 

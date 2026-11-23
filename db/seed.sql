@@ -48,12 +48,14 @@ insert into policies (agency_id, version, active, rules) values
 insert into properties (id, agency_id, address, city, postcode) values
   ('prop_mcr_1', 'agency_northbridge',  'Flat 4, 18 Mill Lane',      'Manchester', 'M4 6AB'),
   ('prop_lds_1', 'agency_northbridge',  '27 Kirkgate Row',           'Leeds',      'LS2 7DJ'),
-  ('prop_bri_1', 'agency_harbour_lane', 'Flat 2, 9 Quayside Court',  'Bristol',    'BS1 4RT');
+  ('prop_bri_1', 'agency_harbour_lane', 'Flat 2, 9 Quayside Court',  'Bristol',    'BS1 4RT'),
+  ('prop_shf_1', 'agency_riverside',    '12 Weir View Terrace',      'Sheffield',  'S3 8QT');
 
 insert into tenants (id, name, email, property_id) values
   ('tenant_olivia', 'Olivia Bennett', 'olivia.bennett@example.com', 'prop_mcr_1'),
   ('tenant_james',  'James Okafor',   'james.okafor@example.com',   'prop_lds_1'),
-  ('tenant_priya',  'Priya Shah',     'priya.shah@example.com',     'prop_bri_1');
+  ('tenant_priya',  'Priya Shah',     'priya.shah@example.com',     'prop_bri_1'),
+  ('tenant_daniel', 'Daniel Hughes',  'daniel.hughes@example.com',  'prop_shf_1');
 
 -- Simulated manager sessions for the operations brief.
 insert into managers (id, name) values

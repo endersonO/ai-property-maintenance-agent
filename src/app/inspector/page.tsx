@@ -10,6 +10,7 @@ import { headers } from "next/headers";
 import { clientKey } from "@/server/http";
 import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../access-form";
+import { AskBox } from "../ask-box";
 import { ChecksCell, fmtDate, fmtMs, RunOutcomeCell } from "./components";
 import { parseFailingFilter } from "./filters";
 import { ChecksTable, StatusLine } from "./quality";
@@ -53,6 +54,23 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
       {/* Each headline count links to the filter that lists exactly the runs it counts. */}
       <StatusLine summary={summary} hrefFor={flaggedHref} />
       <ChecksTable rows={quality} evaluators={evaluators} flaggedHref={flaggedHref} />
+
+      <div className="mb-8">
+        <AskBox
+          id="quality"
+          endpoint="/api/quality-assistant"
+          heading="Ask about the agent"
+          description="An assistant that reads this page's runs and checks through read-only tools. Every count it gives cites its source, and what tenants wrote is treated as data, never as instructions."
+          placeholder="Why was the last flagged run flagged?"
+          accessCode={typeof code === "string" ? code : null}
+          examples={[
+            "Is the agent behaving?",
+            "Why were runs flagged, and are they real problems?",
+            "Show me the latest emergencies and whether a person reviewed them",
+            "Did anyone try to make the agent break its rules?",
+          ]}
+        />
+      </div>
 
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="runs-heading" className="text-title font-semibold">
@@ -112,8 +130,10 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
                   </Link>
                 </th>
                 <td className="border-b border-border px-3 py-2">
-                  {run.actorName ?? "—"}
-                  <span className="block text-label text-muted">{run.agency ?? (run.workflowId === "operations-brief" ? "manager" : "")}</span>
+                  {run.actorName ?? (run.workflowId === "quality-analyst" ? "Inspector user" : "—")}
+                  <span className="block text-label text-muted">
+                    {run.agency ?? (run.workflowId === "operations-brief" ? "manager" : run.workflowId === "quality-analyst" ? "asked the assistant" : "")}
+                  </span>
                 </td>
                 <td className="max-w-xs border-b border-border px-3 py-2">
                   {run.asked ? <span className="line-clamp-2">&ldquo;{run.asked}&rdquo;</span> : <span className="text-muted">—</span>}

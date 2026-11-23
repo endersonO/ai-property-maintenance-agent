@@ -6,6 +6,7 @@ import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
 import { getRunDetail, listRuns, qualityByEvaluator, qualitySummary, runEvaluations, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
+import { PostgresQuality } from "@/infra/postgres-quality";
 import {
   backfillEvaluations,
   loadEvaluableRun,
@@ -535,6 +536,60 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       // The list says when it shows only part of the matching runs.
       const page = await listRuns(sql, { evaluators: four, failing: "any", limit: 2 });
       expect([page.length, page[0].totalMatching]).toEqual([2, 3]);
+    });
+
+    it("the Inspector's assistant reads a run by its short ref, with its checks, tools and ticket cost", async () => {
+      const run = await leakRun();
+      await sql`insert into run_evaluations (run_id, evaluator_id, evaluator_version, verdict, evidence)
+                values (${run.runId}, 'hazard_logged', ${evaluators[1].version}, 'fail', 'gas smell, no ticket')`;
+      const quality = new PostgresQuality(sql, evaluators);
+
+      const lookup = await quality.run(run.runId.slice(0, 8));
+      expect(lookup.kind).toBe("found");
+      if (lookup.kind !== "found") return;
+      expect(lookup.run).toMatchObject({
+        id: run.runId,
+        who: "Olivia Bennett",
+        asked: "Water is pouring through my ceiling",
+        toolCalls: [{ tool: "create_maintenance_ticket", status: "ok" }],
+        checks: [
+          { checkId: "emergency_reviewed", verdict: "pending" },
+          { checkId: "hazard_logged", verdict: "fail", evidence: "gas smell, no ticket" },
+        ],
+      });
+      expect(lookup.run.ticketDetails).toHaveLength(1);
+      expect(lookup.run.ticketDetails[0].estimatedCostGbp).toBeGreaterThan(0);
+      // The same run's full id with dashes resolves too.
+      expect((await quality.run(run.runId)).kind).toBe("found");
+    });
+
+    it("a run ref that matches two runs is ambiguous; LIKE wildcards never match", async () => {
+      const a = await newRun();
+      const b = await newRun();
+      await sql`update runs set id = 'abcdef12-0000-4000-8000-000000000001' where id = ${a}`;
+      await sql`update runs set id = 'abcdef12-0000-4000-8000-000000000002' where id = ${b}`;
+      const quality = new PostgresQuality(sql, evaluators);
+      expect((await quality.run("abcdef12")).kind).toBe("ambiguous");
+      expect((await quality.run("abcdef12-0000-4000-8000-000000000002")).kind).toBe("found");
+      expect((await quality.run("%%%%%%%%")).kind).toBe("not_found");
+      expect((await quality.run("________")).kind).toBe("not_found");
+    });
+
+    it("the assistant's run list filters by workflow and reports the total before the limit", async () => {
+      await leakRun();
+      await leakRun();
+      const statusRun = await newRun();
+      await sql`update runs set workflow_id = 'ticket-status', status = 'completed' where id = ${statusRun}`;
+      const quality = new PostgresQuality(sql, evaluators);
+      const maintenance = await quality.runs({ problems: null, checkId: null, verdict: null, workflowId: "maintenance", limit: 1 });
+      expect([maintenance.total, maintenance.runs.length, maintenance.runs[0].workflowId]).toEqual([2, 1, "maintenance"]);
+      const status = await quality.runs({ problems: null, checkId: null, verdict: null, workflowId: "ticket-status", limit: 5 });
+      expect(status.runs.map((r) => r.id)).toEqual([statusRun]);
+      const overview = await quality.overview();
+      expect(overview.runsByWorkflow).toEqual([
+        { workflowId: "maintenance", runs: 2 },
+        { workflowId: "ticket-status", runs: 1 },
+      ]);
     });
 
     it("only considers runs inside the --since window", async () => {

@@ -1,7 +1,7 @@
 import type { EvaluableRun, Evaluator } from "@/runtime/evaluation";
 
-// Monitor (heuristic): every figure in an operations brief is backed by the fact it cites.
-// The brief must write "… 6.1 hours [fact_key]": each number is paired with the first citation
+// Monitor (heuristic): every figure in an operations brief or a quality-analyst answer is backed
+// by the fact it cites. The answer must write "… 6.1 hours [fact_key]": each number is paired with the first citation
 // after it in the same sentence, and
 //   - the cited key must be a fact returned by a successful tool call in this run;
 //   - the number must equal the fact's value at the precision written (6.1 matches 6.12; 6 matches 6.4);
@@ -16,9 +16,11 @@ type CitedFact = { key: string; metric?: string; agency: string; value: number; 
 
 const CITATION = /\[([a-z0-9_.\-]+)\]/gi;
 // Numbers that are not figures: dates and period labels (2026-11-01, 2026-Q3, 2025-11..2026-10),
-// times (00:12), years, "per 100 homes", and coverage from the tools' notes ("2 of 3 months").
+// times (00:12), years, "per 100 homes", coverage from the tools' notes ("2 of 3 months"), and
+// full ids (a UUID's "-1234" is not a figure). Short 8-character refs are skipped only when they
+// are a prefix of an id the tools returned (see knownRefs): "12345678 runs" is still a figure.
 const NOT_FIGURES =
-  /\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) \d+ months\b|\b\d+\/\d+\b|\b\d{1,2}:\d{2}\b/gi;
+  /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) \d+ months\b|\b\d+\/\d+\b|\b\d{1,2}:\d{2}\b/gi;
 // Words that carry the sign of a negative change written as a magnitude.
 const DECREASE = /\b(?:down|decrease[ds]?|fell|fall|dropped|drop|lower|fewer|declined?|reduction|less)\b/i;
 // A figure, with its sign when one is written ("-5", "−5").
@@ -33,6 +35,32 @@ function factsOf(run: EvaluableRun): Map<string, CitedFact> {
   }
   return facts;
 }
+
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const SHORT_REF = /\b[0-9a-f]{8}\b/gi;
+
+// What the tools returned, beyond facts: the 8-character refs of every id (e.g. run_ref
+// "3f2a9c1b"), and all their text, so a figure QUOTED from it (in backticks, e.g. evidence
+// "`25` is not followed by a citation") is recognised as a quotation, not a claim.
+export type GroundingContext = { refs: Set<string>; toolText: string };
+
+function contextOf(run: EvaluableRun): GroundingContext {
+  const texts = run.toolCalls.filter((c) => c.result.ok).map((c) => JSON.stringify(c.result.ok ? (c.result.data ?? null) : null));
+  const refs = new Set<string>();
+  for (const text of texts) for (const m of text.matchAll(UUID)) refs.add(m[0].slice(0, 8).toLowerCase());
+  return { refs, toolText: texts.join("\n") };
+}
+
+const NO_CONTEXT: GroundingContext = { refs: new Set(), toolText: "" };
+const blank = (m: string) => " ".repeat(m.length);
+
+// Blanks what is not a figure, keeping offsets: the fixed patterns, the known short refs, and
+// backtick quotations that appear verbatim in the tools' results (an invented quote stays).
+const blankNonFigures = (text: string, context: GroundingContext) =>
+  text
+    .replace(/`([^`\n]+)`/g, (m, inner: string) => (context.toolText.includes(inner) ? blank(m) : m))
+    .replace(NOT_FIGURES, blank)
+    .replace(SHORT_REF, (m) => (context.refs.has(m.toLowerCase()) ? blank(m) : m));
 
 const isChange = (fact: CitedFact) => (fact.metric ?? fact.key).startsWith("change_");
 
@@ -66,7 +94,11 @@ function lastNamedAgency(sentence: string, end: number, agencies: string[]): str
 
 export type GroundingProblem = { sentence: string; problem: string };
 
-export function checkGrounding(reply: string, facts: Map<string, CitedFact>): GroundingProblem[] {
+export function checkGrounding(
+  reply: string,
+  facts: Map<string, CitedFact>,
+  context: GroundingContext = NO_CONTEXT,
+): GroundingProblem[] {
   const problems: GroundingProblem[] = [];
   const agencies = [...new Set([...facts.values()].map((f) => f.agency))].filter((a) => !/^all\b/i.test(a));
   // Citation keys contain dots: mask them before finding sentence boundaries.
@@ -80,9 +112,7 @@ export function checkGrounding(reply: string, facts: Map<string, CitedFact>): Gr
     const tokens: { index: number; kind: "number" | "citation"; text: string }[] = [];
     // Citations first (their keys contain period labels), then blank them and the non-figures.
     for (const m of sentence.matchAll(CITATION)) tokens.push({ index: m.index, kind: "citation", text: m[1] });
-    const figuresOnly = sentence
-      .replace(CITATION, (m) => " ".repeat(m.length))
-      .replace(NOT_FIGURES, (m) => " ".repeat(m.length));
+    const figuresOnly = blankNonFigures(sentence.replace(CITATION, blank), context);
     for (const m of figuresOnly.matchAll(NUMBER)) tokens.push({ index: m.index, kind: "number", text: m[0] });
     tokens.sort((a, b) => a.index - b.index);
 
@@ -91,6 +121,8 @@ export function checkGrounding(reply: string, facts: Map<string, CitedFact>): Gr
         pending.push(token.text);
         continue;
       }
+      // A run ref in brackets ("[3f2a9c1b]") names a run; it is not a citation.
+      if (!facts.has(token.text) && context.refs.has(token.text.toLowerCase())) continue;
       const fact = facts.get(token.text);
       const segment = sentence.slice(segmentStart, token.index);
       segmentStart = token.index + token.text.length + 2;
@@ -127,14 +159,19 @@ export function checkGrounding(reply: string, facts: Map<string, CitedFact>): Gr
   return problems;
 }
 
+// Workflows whose answers must cite every figure.
+const CITING_WORKFLOWS = new Set(["operations-brief", "quality-analyst"]);
+
 export const numbersGrounded: Evaluator = {
   id: "numbers_grounded",
-  version: 1,
+  version: 2,
   kind: "monitor",
-  description: "Every figure in an operations brief matches the fact it cites, for the agency it names",
-  appliesTo: (run) => run.workflowId === "operations-brief" && /\d/.test((run.output ?? "").replace(NOT_FIGURES, "")),
+  description: "Every figure in an operations brief or a quality answer matches the fact it cites, for the agency it names",
+  appliesTo: (run) =>
+    CITING_WORKFLOWS.has(run.workflowId) &&
+    /\d/.test(blankNonFigures((run.output ?? "").replace(CITATION, ""), contextOf(run))),
   evaluate: (run) => {
-    const problems = checkGrounding(run.output ?? "", factsOf(run));
+    const problems = checkGrounding(run.output ?? "", factsOf(run), contextOf(run));
     return problems.length === 0
       ? { verdict: "pass", evidence: "every figure matches the fact it cites" }
       : { verdict: "fail", evidence: problems.map((p) => p.problem).join("; ") };

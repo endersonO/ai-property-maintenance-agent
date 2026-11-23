@@ -6,6 +6,9 @@ import { PostgresRepository } from "@/infra/postgres-repository";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
 import type { ChatDeps } from "./chat";
 import type { BriefDeps } from "./operations-brief";
+import type { QualityAssistantDeps } from "./quality-assistant";
+import { PostgresQuality } from "@/infra/postgres-quality";
+import { evaluators } from "@/evaluators";
 import { SlidingWindowLimiter } from "./limits";
 
 // Production wiring: PostgreSQL for data and traces, the configured real model.
@@ -39,4 +42,18 @@ export function getBriefDeps(): BriefDeps {
     loadScope: (managerId) => managerScope(getSql(), managerId),
   };
   return briefDeps;
+}
+
+let qualityDeps: QualityAssistantDeps | undefined;
+
+// The Inspector's assistant: same shared pieces, its own rate limiter, the Inspector's queries
+// for the current evaluator versions.
+export function getQualityDeps(): QualityAssistantDeps {
+  const shared = getServerDeps();
+  qualityDeps ??= {
+    ...shared,
+    limiter: new SlidingWindowLimiter(Number(process.env.QUALITY_MAX_PER_MINUTE) || 5, 60_000),
+    quality: new PostgresQuality(getSql(), shared.evaluators ?? evaluators),
+  };
+  return qualityDeps;
 }

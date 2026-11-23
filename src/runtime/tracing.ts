@@ -75,8 +75,11 @@ const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 // Not glued to letters or hyphens (UUID segments, ISO dates); at least 10 digits.
 const PHONE = /(?<![\w-])\+?\d[\d\s().-]{7,}\d(?![\w-])/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// An ISO date, optionally with a time ("2026-11-23 00" from "2026-11-23 00:25") — never a phone.
-const DATE_LIKE = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2})?$/;
+// Dates are never phones: an ISO date, optionally with a time ("2026-11-23 00" from
+// "2026-11-23 00:25"), and period ranges like "2025-11..2026-10" (twelve digits), which fact
+// keys carry ("…agency_northbridge.2025-11..2026-10"): redacting them broke the citations.
+const DATE = String.raw`\d{4}-\d{2}(?:-\d{2})?`;
+const DATE_LIKE = new RegExp(String.raw`^${DATE}(?:\.\.${DATE})?(?:[ T]\d{1,2})?$`);
 const ID_KEY = /(^id$|_id$|Id$)/;
 // UUIDs and slugs (tenant_olivia, prop_mcr_1): no spaces, "@", "+" or dots.
 const ID_VALUE = /^[\w-]{1,100}$/;

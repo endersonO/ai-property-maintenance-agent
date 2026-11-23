@@ -133,12 +133,16 @@ const guardKey = (ctx: Ctx, args: CreateTicketInput) =>
 
 // What this request already did, read before choosing anything: a retry must return the
 // original result, never pick a ticket again (another one may have been opened since).
+// Most specific first: this exact call's update (same content) names its ticket; only then
+// "this request created a ticket of this kind" — the same request may have updated A with
+// this call and created B with another one.
 async function priorOutcome(ctx: Ctx, args: CreateTicketInput): Promise<{ created: true } | { addedTo: Ticket } | null> {
-  const key = createKey(ctx, args);
-  if ((await ctx.deps.repo.listTickets(tenantOf(ctx))).some((t) => t.idempotencyKey === key)) return { created: true };
   const update = await ctx.deps.repo.findTicketUpdateByKey(guardKey(ctx, args));
   const ticket = update && (await ctx.deps.repo.getTicket(update.ticketId));
-  return ticket ? { addedTo: ticket } : null;
+  if (ticket) return { addedTo: ticket };
+  const key = createKey(ctx, args);
+  if ((await ctx.deps.repo.listTickets(tenantOf(ctx))).some((t) => t.idempotencyKey === key)) return { created: true };
+  return null;
 }
 
 const GUARD_NOTE =

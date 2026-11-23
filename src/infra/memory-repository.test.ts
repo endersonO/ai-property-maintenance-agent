@@ -4,7 +4,7 @@ import { InMemoryRepository } from "./memory-repository";
 
 repositoryContract("InMemoryRepository", async () => {
   const repo = new InMemoryRepository();
-  return { repo, runId: "run-test", close: async (id: string) => repo.closeTicket(id) };
+  return { repo, runId: "run-test", close: async (id: string) => repo.closeTicket(id), decideReviews: async () => repo.decideReviews() };
 });
 
 describe("InMemoryRepository faults", () => {

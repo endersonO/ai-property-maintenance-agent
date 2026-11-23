@@ -115,7 +115,7 @@ export class PostgresRepository implements Repository {
         const [row] = await tx`select * from tickets where idempotency_key = ${t.idempotencyKey} for update`;
         const existing = toTicket(row);
         const [{ has_review }] = await tx`
-          select exists (select 1 from review_queue where ticket_id = ${existing.id}) as has_review
+          select exists (select 1 from review_queue where ticket_id = ${existing.id} and status = 'pending') as has_review
         `;
         const plan = planDuplicate(existing, t, review, has_review);
         let ticket = existing;
@@ -178,7 +178,7 @@ export class PostgresRepository implements Repository {
         throw new Error(`Ticket ${existing.id} is ${existing.status}`);
       }
       const [{ has_review }] = await tx`
-        select exists (select 1 from review_queue where ticket_id = ${existing.id}) as has_review
+        select exists (select 1 from review_queue where ticket_id = ${existing.id} and status = 'pending') as has_review
       `;
       const plan = planDuplicate(existing, incoming, review, has_review);
       let ticket = existing;

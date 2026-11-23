@@ -70,7 +70,10 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
     const close = async (id: string) => {
       await sql`update tickets set status = 'resolved', resolved_at = now() where id = ${id}`;
     };
-    return { repo, runId: await newRun(), close };
+    const decideReviews = async () => {
+      await sql`update review_queue set status = 'approved' where status = 'pending'`;
+    };
+    return { repo, runId: await newRun(), close, decideReviews };
   });
 
   describe("guarantees", () => {

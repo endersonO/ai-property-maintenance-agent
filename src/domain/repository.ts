@@ -88,7 +88,9 @@ export function planDuplicate(
   existing: Ticket,
   incoming: Pick<NewTicket, "priority" | "hazards">,
   review: Omit<NewReview, "ticketId"> | null,
-  existingHasReview: boolean,
+  // Only a PENDING review covers the repeat: one already approved or rejected was decided
+  // before this report and must not silence it.
+  existingHasPendingReview: boolean,
 ): DuplicatePlan {
   const raised = severity(incoming.priority) < severity(existing.priority);
   const hazards = [...new Set([...existing.hazards, ...incoming.hazards])];
@@ -96,12 +98,22 @@ export function planDuplicate(
   // (a gas smell reported on an emergency leak ticket).
   const newHazards = hazards.length > existing.hazards.length;
   const update = raised || newHazards ? { priority: raised ? incoming.priority : existing.priority, hazards } : null;
-  const needsReview = review !== null && (raised || !existingHasReview);
+  const added = hazards.filter((h) => !existing.hazards.includes(h));
+  // When the policy requires a person, they hear about an escalation and about every new
+  // hazard (a gas smell on an emergency leak ticket), and about a repeat nobody is looking at.
+  const needsReview = review !== null && (raised || newHazards || !existingHasPendingReview);
   return {
     update,
     raised,
     review: needsReview
-      ? { ...review, reason: raised ? `escalated by a repeated report: ${review.reason}` : review.reason }
+      ? {
+          ...review,
+          reason: raised
+            ? `escalated by a repeated report: ${review.reason}`
+            : newHazards
+              ? `new hazard reported (${added.join(", ")}): ${review.reason}`
+              : review.reason,
+        }
       : null,
   };
 }

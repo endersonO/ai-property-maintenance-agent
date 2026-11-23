@@ -176,6 +176,13 @@ describe("redact", () => {
     }
   });
 
+  it("keeps period ranges, so fact citations survive in stored traces", () => {
+    const cited = "a median of 5.3 hours [median_hours_to_resolve_emergency.agency_northbridge.2025-11..2026-10] (2025-11-01..2026-10-31)";
+    expect(redact(cited)).toBe(cited);
+    // A phone written with dots is still a phone.
+    expect(redact("call 0161.496.0000")).toBe("call [phone]");
+  });
+
   it("redacts phone numbers in UK formats", () => {
     expect(redact("call 07700 900123 or +44 (0)7700-900-123")).toBe("call [phone] or [phone]");
   });

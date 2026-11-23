@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MissingDependency, parseOnly, SCENARIOS, ticketFrom, type ChatReply } from "./demo-conversations";
+import { failedOutcome, MissingDependency, parseOnly, SCENARIOS, ticketFrom, type ChatReply } from "./demo-conversations";
 
 describe("demo-conversations --only", () => {
   it("accepts both the documented and the = syntax", () => {
@@ -48,5 +48,15 @@ describe("demo-conversations dependencies", () => {
 
   it("ticketFrom names what is missing", () => {
     expect(() => ticketFrom(new Map(), "olivia-gas")).toThrow(/needs a ticket from olivia-gas/);
+  });
+});
+
+describe("demo-conversations outcomes", () => {
+  it("a 200 response with outcome 'failed' is a failure, named by its scenario", () => {
+    expect(failedOutcome("inspector-behaving", { outcome: "failed", reply: "Sorry, I couldn't answer that." } as never)).toBe(
+      "inspector-behaving: outcome failed",
+    );
+    expect(failedOutcome("brief-now", {})).toBe("brief-now: outcome undefined");
+    expect(failedOutcome("olivia-gas", { outcome: "completed" })).toBeNull();
   });
 });

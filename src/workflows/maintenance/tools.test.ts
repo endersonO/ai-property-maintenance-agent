@@ -193,6 +193,20 @@ describe("create_maintenance_ticket", () => {
       expect(await repo.listTickets("tenant_olivia")).toHaveLength(2);
     });
 
+    it("a request that added to A and then created B: retrying the first call returns A, not B", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-a");
+      const a = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" }));
+      const r = { ...ctx, requestId: "req-r" };
+      const first = { ...leak, hazards: [], location: "bathroom", description: "Still dripping" };
+      expect((await call("create_maintenance_ticket", first, r)).result).toMatchObject({ ok: true, data: { ticket_id: a, added_to_existing_ticket: true } });
+      const b = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Damp patch", new_problem: true }, r));
+      expect(b).not.toBe(a);
+      const retry = await call("create_maintenance_ticket", first, r);
+      expect(retry.result).toMatchObject({ ok: true, data: { ticket_id: a, added_to_existing_ticket: true } });
+      expect(await repo.listTicketUpdates(b)).toEqual([]);
+      expect(await repo.listTicketUpdates(a)).toHaveLength(1);
+    });
+
     it("retrying a report the guard added to A returns A again, even after B (same kind) was opened", async () => {
       const { repo, ctx, call } = setup("tenant_olivia", "req-a");
       const a = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" }));

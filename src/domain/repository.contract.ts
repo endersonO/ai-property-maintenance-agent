@@ -7,7 +7,13 @@ import type { NewTicket, Repository } from "./repository";
 export function repositoryContract(
   name: string,
   // `close` resolves a ticket the way the agency would (outside the agent's tools).
-  setup: () => Promise<{ repo: Repository; runId: string; close: (ticketId: string) => Promise<void> }>,
+  // `decideReviews` approves every pending review, the way a person at the agency would.
+  setup: () => Promise<{
+    repo: Repository;
+    runId: string;
+    close: (ticketId: string) => Promise<void>;
+    decideReviews: () => Promise<void>;
+  }>,
 ) {
   const ticket = (runId: string, overrides: Partial<NewTicket> = {}): NewTicket => ({
     agencyId: "agency_northbridge",
@@ -239,6 +245,40 @@ export function repositoryContract(
         await repo.addTicketUpdate(update(runId, t.id, "find-me"), { priority: "normal", hazards: [] }, null);
         expect((await repo.findTicketUpdateByKey("find-me"))?.ticketId).toBe(t.id);
         expect(await repo.findTicketUpdateByKey("nope")).toBeNull();
+      });
+
+      it("a new hazard on an emergency whose review was already decided reaches a person again", async () => {
+        const { repo, runId, decideReviews } = await setup();
+        const { ticket: t } = await repo.createTicketWithReview(ticket(runId), reviewFor(runId)); // emergency leak
+        await decideReviews();
+        const result = await repo.addTicketUpdate(
+          { ...update(runId, t.id), details: "I can smell gas too", hazards: ["gas_smell"] },
+          { priority: "emergency", hazards: ["active_water_leak", "gas_smell"] },
+          reviewFor(runId),
+        );
+        expect(result.escalated).toBe(false);
+        expect(result.review?.reason).toMatch(/^new hazard reported \(gas_smell\)/);
+        expect((await repo.listReviews("tenant_olivia")).filter((r) => r.status === "pending")).toHaveLength(1);
+      });
+
+      it("a new hazard while a review is still pending is flagged to the reviewer with its own review", async () => {
+        const { repo, runId } = await setup();
+        const { ticket: t } = await repo.createTicketWithReview(ticket(runId), reviewFor(runId)); // pending
+        const result = await repo.addTicketUpdate(
+          { ...update(runId, t.id), details: "I can smell gas too", hazards: ["gas_smell"] },
+          { priority: "emergency", hazards: ["active_water_leak", "gas_smell"] },
+          reviewFor(runId),
+        );
+        expect(result.review?.reason).toMatch(/^new hazard reported \(gas_smell\)/);
+      });
+
+      it("a repeat nobody is looking at gets a review; one with a pending review doesn't add another", async () => {
+        const { repo, runId, decideReviews } = await setup();
+        const { ticket: t } = await repo.createTicketWithReview(ticket(runId), reviewFor(runId));
+        const same = { priority: "emergency" as const, hazards: ["active_water_leak" as const] };
+        expect((await repo.addTicketUpdate(update(runId, t.id, "u-pending"), same, reviewFor(runId))).review).toBeNull();
+        await decideReviews();
+        expect((await repo.addTicketUpdate(update(runId, t.id, "u-decided"), same, reviewFor(runId))).review).not.toBeNull();
       });
 
       it("refuses a closed ticket and writes nothing", async () => {

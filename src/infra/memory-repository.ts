@@ -61,7 +61,7 @@ export class InMemoryRepository implements Repository {
     const existingId = this.ticketsByKey.get(newTicket.idempotencyKey);
     if (existingId) {
       const existing = this.tickets.get(existingId)!;
-      const hasReview = [...this.reviews.values()].some((r) => r.ticketId === existingId);
+      const hasReview = [...this.reviews.values()].some((r) => r.ticketId === existingId && r.status === "pending");
       const plan = planDuplicate(existing, newTicket, newReview, hasReview);
       const added: Review | null = plan.review && {
         ...plan.review,
@@ -118,7 +118,7 @@ export class InMemoryRepository implements Repository {
     if (existing.status === "resolved" || existing.status === "cancelled") {
       throw new Error(`Ticket ${existing.id} is ${existing.status}`);
     }
-    const hasReview = [...this.reviews.values()].some((r) => r.ticketId === existing.id);
+    const hasReview = [...this.reviews.values()].some((r) => r.ticketId === existing.id && r.status === "pending");
     const plan = planDuplicate(existing, incoming, newReview, hasReview);
     // Build everything first, commit at the end: a fault leaves no partial state.
     const review: Review | null = plan.review && {
@@ -147,6 +147,11 @@ export class InMemoryRepository implements Repository {
 
   async findTicketUpdateByKey(idempotencyKey: string): Promise<TicketUpdate | null> {
     return this.updates.get(idempotencyKey) ?? null;
+  }
+
+  // Test hook: the agency decides every pending review.
+  decideReviews(status: "approved" | "rejected" = "approved") {
+    for (const [id, r] of this.reviews) if (r.status === "pending") this.reviews.set(id, { ...r, status });
   }
 
   // Test hook: a ticket resolved by the agency.

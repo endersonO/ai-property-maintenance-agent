@@ -20,7 +20,9 @@ type Scenario =
       dependsOn?: string[];
       turns: Turn[];
     }
-  | { id: string; kind: "manager"; managerId: string; question: string };
+  | { id: string; kind: "manager"; managerId: string; question: string }
+  // A question to the Agent Inspector's assistant.
+  | { id: string; kind: "inspector"; question: string };
 
 const shortRef = (id: string) => id.slice(0, 8);
 
@@ -106,6 +108,21 @@ const SCENARIOS: Scenario[] = [
   },
   { id: "daniel-rent", kind: "tenant", tenantId: "tenant_daniel", turns: ["Can you lower my rent next month?"] },
   // Managers: live state and the synthetic history, every figure cited.
+  // Follow-ups: details go to the open ticket, in the same conversation or a later one.
+  {
+    id: "olivia-radiators",
+    kind: "tenant",
+    tenantId: "tenant_olivia",
+    turns: ["The radiators in the bedroom are cold.", "Now the boiler shows an error code and there's no hot water at all."],
+  },
+  {
+    id: "priya-mould-spreading",
+    kind: "tenant",
+    tenantId: "tenant_priya",
+    // No ticket id in the message: the agent must find Priya's open mould ticket itself (from
+    // priya-mould, in this run or an earlier one). On a fresh database it reports a new one.
+    turns: ["The black mould from the bathroom is spreading to the bedroom wall now."],
+  },
   { id: "brief-now", kind: "manager", managerId: "manager_ops", question: "What needs attention right now across my agencies?" },
   { id: "brief-trend", kind: "manager", managerId: "manager_ops", question: "How did maintenance reports trend last quarter?" },
   {
@@ -121,6 +138,12 @@ const SCENARIOS: Scenario[] = [
     question: "Compare Riverside Homes with Northbridge over the last 12 months.",
   },
 ];
+
+// Engineers: the Inspector's assistant reads the runs above.
+SCENARIOS.push(
+  { id: "inspector-behaving", kind: "inspector", question: "Is the agent behaving?" },
+  { id: "inspector-flagged", kind: "inspector", question: "Why were runs flagged, and are they real problems?" },
+);
 
 // Spacing between turns keeps the model under its requests-per-minute limit.
 const PAUSE_MS = 20_000;
@@ -166,6 +189,12 @@ async function post(base: string, code: string, path: string, body: unknown) {
   return json;
 }
 
+// The endpoints answer HTTP 200 for a run that failed (outcome "failed", with a polite reply),
+// so success is the outcome, not the status code.
+export function failedOutcome(id: string, out: { outcome?: unknown }): string | null {
+  return out.outcome === "completed" ? null : `${id}: outcome ${String(out.outcome)}`;
+}
+
 async function main() {
   const base = process.env.DEMO_BASE_URL;
   const code = process.env.DEMO_ACCESS_CODE;
@@ -174,8 +203,18 @@ async function main() {
 
   const replies = new Map<string, ChatReply>();
   let first = true;
+  const failures: string[] = [];
   for (const scenario of SCENARIOS) {
     if (only && !only.has(scenario.id)) continue;
+    if (scenario.kind === "inspector") {
+      if (!first) await pause();
+      first = false;
+      const out = await post(base, code, "/api/quality-assistant", { requestId: randomUUID(), message: scenario.question });
+      const problem = failedOutcome(scenario.id, out);
+      if (problem) failures.push(problem);
+      console.log(`\n[${scenario.id}] inspector: ${scenario.question}\n  → ${String(out.reply ?? out.outcome).slice(0, 400)}`);
+      continue;
+    }
     if (scenario.kind === "manager") {
       if (!first) await pause();
       first = false;
@@ -184,6 +223,8 @@ async function main() {
         requestId: randomUUID(),
         message: scenario.question,
       });
+      const problem = failedOutcome(scenario.id, out);
+      if (problem) failures.push(problem);
       console.log(`\n[${scenario.id}] ${scenario.managerId}: ${scenario.question}\n  → ${String(out.reply ?? out.outcome).slice(0, 240)}`);
       continue;
     }
@@ -196,6 +237,7 @@ async function main() {
       } catch (error) {
         if (!(error instanceof MissingDependency)) throw error;
         console.log(`\n[${scenario.id}] skipped, nothing sent: ${error.message}`);
+        failures.push(`${scenario.id}: skipped (${error.message})`);
         break;
       }
       if (!first) await pause();
@@ -207,13 +249,23 @@ async function main() {
         message,
         history,
       });
-      history.push({ role: "user", content: message }, { role: "assistant", content: out.reply.slice(0, 2000) });
-      replies.set(scenario.id, out);
       console.log(
         `\n[${scenario.id}] ${scenario.tenantId}: ${message}\n  ${out.outcome}, tickets ${out.createdTicketIds.map(shortRef).join(", ") || "none"}` +
           `\n  → ${out.reply.slice(0, 240)}`,
       );
+      // A failed turn ends the scenario: later turns and dependent scenarios would build on it.
+      const problem = failedOutcome(scenario.id, out);
+      if (problem) {
+        failures.push(problem);
+        break;
+      }
+      history.push({ role: "user", content: message }, { role: "assistant", content: out.reply.slice(0, 2000) });
+      replies.set(scenario.id, out);
     }
+  }
+  if (failures.length > 0) {
+    console.error(`\n${failures.length} scenario(s) did not complete:\n  ${failures.join("\n  ")}`);
+    process.exitCode = 1;
   }
 }
 

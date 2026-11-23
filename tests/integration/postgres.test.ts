@@ -16,7 +16,7 @@ import { evaluators as allEvaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 import { replaceSyntheticHistory } from "@/infra/operations-store";
 import { managerScope, operationsDashboard, PostgresOperations } from "@/infra/postgres-operations";
-import { resolutionFacts, volumeFacts, type Fact } from "@/infra/operations-queries";
+import { readOpenNow, resolutionFacts, volumeFacts, type Fact } from "@/infra/operations-queries";
 import { demoHistoryAgencies, generateHistory } from "@/operations/history";
 
 const pendingIds = async (...args: Parameters<typeof runsPendingEvaluation>) =>
@@ -760,12 +760,13 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
     it("the dashboard shows the same figures as the brief's queries, plus the monthly trend", async () => {
       const dashboard = await operationsDashboard(sql, scope.agencyIds);
-      if (!dashboard) throw new Error("expected a dashboard");
+      const history = dashboard.history;
+      if (!history) throw new Error("expected the synthetic history");
       // Same queries, same snapshot: the page and a brief can't disagree.
-      expect(dashboard.volume).toEqual(await volumeFacts(sql, scope));
-      expect(dashboard.resolution).toEqual(await resolutionFacts(sql, scope));
+      expect(history.volume).toEqual(await volumeFacts(sql, scope));
+      expect(history.resolution).toEqual(await resolutionFacts(sql, scope));
       // Northbridge per month: 1 ticket / 400 homes = 0.25 (Apr, May, Jul, Aug), 0 in Jun, 2 in Sep.
-      const northbridge = dashboard.monthly.facts.filter((f) => f.agencyId === "agency_northbridge").map((f) => [f.period, f.value]);
+      const northbridge = history.monthly.facts.filter((f) => f.agencyId === "agency_northbridge").map((f) => [f.period, f.value]);
       expect(northbridge).toEqual([
         ["2026-04", 0.25],
         ["2026-05", 0.25],
@@ -1004,6 +1005,39 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
   describe("operations port on PostgreSQL", () => {
     beforeEach(reset);
+
+    it("open now counts live tickets in scope, emergencies, their age and pending reviews", async () => {
+      const runId = await newRun();
+      const review = { runId, agencyId: "agency_northbridge", tenantId: "tenant_olivia", source: "policy" as const, reason: "emergency" };
+      const { ticket: open } = await repo.createTicketWithReview(ticket(runId), review);
+      await sql`update tickets set created_at = now() - interval '5 hours' where id = ${open.id}`;
+      const { ticket: done } = await repo.createTicketWithReview({ ...ticket(runId), idempotencyKey: "done", priority: "normal", hazards: [] }, null);
+      await sql`update tickets set status = 'resolved', resolved_at = now() where id = ${done.id}`;
+      // A Harbour Lane emergency outside the scope.
+      await repo.createTicketWithReview({ ...ticket(runId), idempotencyKey: "hl", agencyId: "agency_harbour_lane", propertyId: "prop_bri_1", tenantId: "tenant_priya" }, null);
+
+      const { facts } = await readOpenNow(sql, ["agency_northbridge", "agency_riverside"]);
+      const v = Object.fromEntries(facts.map((f) => [f.key, f.value]));
+      expect(v).toMatchObject({
+        "open_now.agency_northbridge.now": 1,
+        "open_now_emergency.agency_northbridge.now": 1,
+        "reviews_pending.agency_northbridge.now": 1,
+        "open_now.agency_riverside.now": 0,
+        "open_now_emergency.all.now": 1,
+      });
+      expect(v["oldest_open_emergency_hours.agency_northbridge.now"]).toBeCloseTo(5, 0);
+      expect(Object.keys(v).some((k) => k.includes("harbour"))).toBe(false);
+    });
+
+    it("without demonstration history, the dashboard still shows live open tickets", async () => {
+      const runId = await newRun();
+      await repo.createTicketWithReview(ticket(runId), { runId, agencyId: "agency_northbridge", tenantId: "tenant_olivia", source: "policy", reason: "emergency" });
+      const dashboard = await operationsDashboard(sql, ["agency_northbridge"]);
+      expect(dashboard.history).toBeNull();
+      const v = Object.fromEntries(dashboard.openNow.facts.map((f) => [f.key, [f.value, f.unit]]));
+      expect(v["open_now_emergency.agency_northbridge.now"]).toEqual([1, "tickets"]);
+      expect(v["reviews_pending.agency_northbridge.now"]).toEqual([1, "reviews"]);
+    });
 
     it("loads a manager's scope from the database, and null for an unknown one", async () => {
       expect(await managerScope(sql, "manager_north")).toEqual({

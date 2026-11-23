@@ -1,6 +1,6 @@
 import type postgres from "postgres";
 import type { BriefQuery, BriefReport, ManagerScope, OperationsPort } from "@/operations/port";
-import { readMonthlyRates, readResolution, readSnapshot, readVolume, type Fact } from "./operations-queries";
+import { readMonthlyRates, readOpenNow, readResolution, readSnapshot, readVolume, type Fact } from "./operations-queries";
 
 // Operations port on PostgreSQL. Briefs run on the synthetic history, cut at the date it was
 // observed up to (live data has no operations history yet). The cut-off and the facts are read
@@ -37,6 +37,14 @@ export class PostgresOperations implements OperationsPort {
   resolution(query: BriefQuery & { priority: "emergency" | "high" | "normal" | "low" | null }) {
     return this.report((tx, asOf) => readResolution(tx, { ...query, dataset: "synthetic", asOf }));
   }
+
+  // Live data, current state: no synthetic history involved.
+  openNow(query: Pick<BriefQuery, "agencyIds">): Promise<BriefReport> {
+    return readSnapshot(this.sql, async (tx) => {
+      const { facts, notes, now } = await readOpenNow(tx, query.agencyIds);
+      return { facts, notes, dataset: "live" as const, asOf: now };
+    });
+  }
 }
 
 // The manager's authorised agencies, from the database. Null for an unknown manager.
@@ -50,36 +58,50 @@ export async function managerScope(sql: postgres.Sql, managerId: string): Promis
   return row ? { managerId: row.id, name: row.name, agencyIds: row.agency_ids } : null;
 }
 
-export type OperationsDashboard = {
+export type OperationsHistory = {
   dataset: "synthetic";
   asOf: Date;
   volume: { facts: Fact[]; notes: string[] };
   resolution: { facts: Fact[]; notes: string[] };
   emergencies: { facts: Fact[]; notes: string[] };
   monthly: { facts: Fact[]; notes: string[] };
+};
+
+export type OperationsDashboard = {
   agencies: { id: string; name: string; acquiredOn: string | null; onboardedOn: string | null }[];
+  // Live tickets now: always available, demonstration history or not.
+  openNow: { facts: Fact[]; notes: string[]; now: Date };
+  // The synthetic history; null when it hasn't been generated.
+  history: OperationsHistory | null;
 };
 
 // Everything the dashboard shows, from the SAME queries the brief uses, in one snapshot — so a
 // figure on the page and the same figure in a brief can't disagree.
-export async function operationsDashboard(sql: postgres.Sql, agencyIds: string[]): Promise<OperationsDashboard | null> {
+export async function operationsDashboard(sql: postgres.Sql, agencyIds: string[]): Promise<OperationsDashboard> {
   return readSnapshot(sql, async (tx) => {
-    const [meta] = await tx`select as_of from synthetic_history_meta`;
-    if (!meta) return null;
-    const asOf = meta.as_of as Date;
-    const scope = { dataset: "synthetic" as const, asOf, period: "last_closed_quarter" as const, agencyIds };
     const agencies = await tx`
       select id, name, acquired_on::text as acquired_on, onboarded_on::text as onboarded_on
       from agencies where id = any(${agencyIds}) order by name
     `;
+    const openNow = await readOpenNow(tx, agencyIds);
+    const [meta] = await tx`select as_of from synthetic_history_meta`;
+    let history: OperationsHistory | null = null;
+    if (meta) {
+      const asOf = meta.as_of as Date;
+      const scope = { dataset: "synthetic" as const, asOf, period: "last_closed_quarter" as const, agencyIds };
+      history = {
+        dataset: "synthetic",
+        asOf,
+        volume: await readVolume(tx, scope),
+        resolution: await readResolution(tx, { ...scope, priority: null }),
+        emergencies: await readResolution(tx, { ...scope, priority: "emergency" }),
+        monthly: await readMonthlyRates(tx, { asOf, agencyIds }),
+      };
+    }
     return {
-      dataset: "synthetic" as const,
-      asOf,
-      volume: await readVolume(tx, scope),
-      resolution: await readResolution(tx, { ...scope, priority: null }),
-      emergencies: await readResolution(tx, { ...scope, priority: "emergency" }),
-      monthly: await readMonthlyRates(tx, { asOf, agencyIds }),
       agencies: agencies.map((a) => ({ id: a.id, name: a.name, acquiredOn: a.acquired_on, onboardedOn: a.onboarded_on })),
+      openNow,
+      history,
     };
   });
 }

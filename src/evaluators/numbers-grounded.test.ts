@@ -108,6 +108,7 @@ describe("numbers_grounded", () => {
 
   it("ignores a bracketed label that carries no figure", () => {
     expect(problems("This is synthetic demonstration data [dataset], with states as of 2026-11-01.")).toEqual([]);
+    expect(problems("Based on live data as of 2026-11-23 00:12 UTC.")).toEqual([]);
   });
 
   it("ignores periods, dates, years and coverage notes", () => {

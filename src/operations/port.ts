@@ -22,6 +22,8 @@ export interface OperationsPort {
   agencies(agencyIds: string[]): Promise<AgencyProfile[]>;
   volume(query: BriefQuery): Promise<BriefReport>;
   resolution(query: BriefQuery & { priority: "emergency" | "high" | "normal" | "low" | null }): Promise<BriefReport>;
+  // Live tickets now: open, open emergencies, oldest open emergency, reviews pending.
+  openNow(query: Pick<BriefQuery, "agencyIds">): Promise<BriefReport>;
 }
 
 // Dependencies of the operations-brief tools. The scope is set by the server from the

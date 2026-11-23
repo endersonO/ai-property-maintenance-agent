@@ -35,6 +35,15 @@ export const CANNED = {
     ],
     notes: [],
   },
+  openNow: {
+    facts: [
+      { key: "open_now_emergency.agency_harbour_lane.now", metric: "open_now_emergency", agencyId: "agency_harbour_lane", period: "now", unit: "tickets", value: 1 },
+      { key: "open_now_emergency.agency_northbridge.now", metric: "open_now_emergency", agencyId: "agency_northbridge", period: "now", unit: "tickets", value: 2 },
+      { key: "open_now_emergency.agency_riverside.now", metric: "open_now_emergency", agencyId: "agency_riverside", period: "now", unit: "tickets", value: 0 },
+      { key: "open_now_emergency.all.now", metric: "open_now_emergency", agencyId: "all", period: "now", unit: "tickets", value: 2 },
+    ] as Fact[],
+    notes: [],
+  },
 };
 
 const north = seed.managers.find((m) => m.id === "manager_north")!;
@@ -166,6 +175,31 @@ export const operationsBriefEvals: EvalCase<OpsDeps>[] = [
       const [call] = toolEvents(results[0]);
       const listed = call?.result.ok ? (call.result.data as { agency_id: string }[]).map((a) => a.agency_id) : [];
       e.equal("agencies listed", listed, ["agency_northbridge", "agency_riverside"]);
+      return e.failures;
+    },
+  },
+  {
+    id: "E17",
+    title: "'How many emergencies are open?' reads live tickets now, within the manager's scope",
+    actorId: "manager_north",
+    runs: [
+      {
+        requestId: "e17",
+        userMessage: "How many emergencies are open?",
+        script: [
+          { toolCalls: [{ name: "get_open_now", args: { agency_id: null } }] },
+          { text: "Right now (live data) Northbridge Lettings has 2 open emergencies [open_now_emergency.agency_northbridge.now]." },
+        ],
+      },
+    ],
+    check: async ({ deps, results }) => {
+      const e = expectations();
+      e.equal("queried", calls(deps).map((c) => [c.kind, c.query.agencyIds]), [["openNow", ["agency_northbridge", "agency_riverside"]]]);
+      const [call] = toolEvents(results[0]);
+      const data = call?.result.ok ? (call.result.data as { dataset: string; facts: { agency_id: string }[] }) : null;
+      e.equal("dataset", data?.dataset, "live");
+      // Harbour Lane is outside the scope: its live tickets are not returned.
+      e.equal("agencies", data?.facts.map((f) => f.agency_id), ["agency_northbridge", "agency_riverside", "all"]);
       return e.failures;
     },
   },

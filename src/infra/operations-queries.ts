@@ -13,7 +13,7 @@ export type Fact = {
   // An agency id, or "all" for the whole scope.
   agencyId: string;
   period: string;
-  unit: "tickets" | "tickets_per_100_homes_per_month" | "percent" | "hours" | "days";
+  unit: "tickets" | "reviews" | "tickets_per_100_homes_per_month" | "percent" | "hours" | "days";
   value: number;
   // Observations behind the value, when it is a statistic.
   n?: number;
@@ -359,4 +359,40 @@ export async function readMonthlyRates(
     ),
     notes: [],
   };
+}
+
+// The current state of LIVE tickets — "what is open right now?", not a historical period. Every
+// agency in scope gets a row (zeros included). Read inside the caller's snapshot; "now" is the
+// database's, returned so the answer says when it was taken.
+export async function readOpenNow(sql: postgres.Sql, agencyIds: string[]): Promise<Report & { now: Date }> {
+  const [{ now }] = await sql`select now() as now`;
+  const tickets = await sql`
+    select coalesce(agency_id, 'all') as agency_id,
+           count(*) filter (where status in ('open', 'in_progress'))::int as open_now,
+           count(*) filter (where status in ('open', 'in_progress') and priority = 'emergency')::int as open_emergency,
+           max(extract(epoch from now() - created_at) / 3600)
+             filter (where status in ('open', 'in_progress') and priority = 'emergency') as oldest_emergency_hours
+    from tickets
+    where agency_id = any(${agencyIds})
+    group by grouping sets ((agency_id), ())
+  `;
+  const reviews = await sql`
+    select coalesce(agency_id, 'all') as agency_id, count(*)::int as pending
+    from review_queue
+    where status = 'pending' and agency_id = any(${agencyIds})
+    group by grouping sets ((agency_id), ())
+  `;
+  const facts: Fact[] = [];
+  for (const agencyId of [...agencyIds].sort().concat("all")) {
+    const t = tickets.find((r) => r.agency_id === agencyId);
+    const base = { agencyId, period: "now" };
+    facts.push(fact({ ...base, metric: "open_now", unit: "tickets", value: t?.open_now ?? 0 }));
+    facts.push(fact({ ...base, metric: "open_now_emergency", unit: "tickets", value: t?.open_emergency ?? 0 }));
+    if (t?.oldest_emergency_hours != null) {
+      facts.push(fact({ ...base, metric: "oldest_open_emergency_hours", unit: "hours", value: round(Number(t.oldest_emergency_hours), 1) }));
+    }
+    // Reviews can exist without a ticket: they are counted as reviews, not tickets.
+    facts.push(fact({ ...base, metric: "reviews_pending", unit: "reviews", value: reviews.find((r) => r.agency_id === agencyId)?.pending ?? 0 }));
+  }
+  return { facts, notes: [`Live tickets, current state as of ${(now as Date).toISOString().slice(0, 16).replace("T", " ")} UTC.`], now };
 }

@@ -4,10 +4,10 @@ import type { BriefQuery, BriefReport, OperationsContext, OperationsPort, Report
 // In-memory operations port for executor evals and tests: canned reports, filtered to the
 // requested agencies, returned with their context, and the calls it received.
 export class InMemoryOperations implements OperationsPort {
-  readonly calls: { kind: "volume" | "resolution"; query: BriefQuery & { priority?: string | null } }[] = [];
+  readonly calls: { kind: "volume" | "resolution" | "openNow"; query: Pick<BriefQuery, "agencyIds"> & { period?: string; priority?: string | null } }[] = [];
 
   constructor(
-    private readonly reports: { volume: Report; resolution: Report },
+    private readonly reports: { volume: Report; resolution: Report; openNow?: Report },
     private readonly ctx: OperationsContext = { dataset: "synthetic", asOf: new Date("2026-11-01T00:00:00Z") },
   ) {}
 
@@ -21,7 +21,7 @@ export class InMemoryOperations implements OperationsPort {
       .map((a) => ({ id: a.id, name: a.name, acquiredOn: a.acquiredOn, onboardedOn: a.onboardedOn }));
   }
 
-  private filtered(report: Report, query: BriefQuery): BriefReport {
+  private filtered(report: Report, query: Pick<BriefQuery, "agencyIds">): BriefReport {
     return {
       facts: report.facts.filter((f) => f.agencyId === "all" || query.agencyIds.includes(f.agencyId)),
       notes: report.notes,
@@ -37,5 +37,16 @@ export class InMemoryOperations implements OperationsPort {
   async resolution(query: BriefQuery & { priority: "emergency" | "high" | "normal" | "low" | null }) {
     this.calls.push({ kind: "resolution", query });
     return this.filtered(this.reports.resolution, query);
+  }
+
+  async openNow(query: Pick<BriefQuery, "agencyIds">) {
+    this.calls.push({ kind: "openNow", query });
+    const report = this.reports.openNow ?? { facts: [], notes: [] };
+    return {
+      facts: report.facts.filter((f) => f.agencyId === "all" || query.agencyIds.includes(f.agencyId)),
+      notes: report.notes,
+      dataset: "live" as const,
+      asOf: new Date("2026-11-23T10:00:00Z"),
+    };
   }
 }

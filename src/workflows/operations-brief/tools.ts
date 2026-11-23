@@ -41,8 +41,11 @@ async function present(ctx: Ctx, report: BriefReport) {
   const names = await ctx.deps.operations.agencyNames(ctx.deps.scope.agencyIds);
   return {
     dataset,
-    data_note: dataset === "synthetic" ? "Synthetic demonstration data, not real operations." : null,
-    as_of: asOf.toISOString().slice(0, 10),
+    data_note:
+      dataset === "synthetic"
+        ? "Synthetic demonstration history, not real operations."
+        : "Live data: the current state of real tickets.",
+    as_of: dataset === "live" ? asOf.toISOString().slice(0, 16).replace("T", " ") + " UTC" : asOf.toISOString().slice(0, 10),
     facts: report.facts.map((f: Fact) => ({
       key: f.key,
       metric: f.metric,
@@ -81,6 +84,19 @@ export const getResolution = defineTool<OpsDeps, ResolutionInput>({
     present(ctx, await ctx.deps.operations.resolution({ ...queryOf(ctx, args), priority: args.priority })),
 });
 
+const OpenNowInput = z.strictObject({ agency_id: AgencyFilter });
+type OpenNowInput = z.infer<typeof OpenNowInput>;
+
+export const getOpenNow = defineTool<OpsDeps, OpenNowInput>({
+  name: "get_open_now",
+  description:
+    "Right now, from LIVE tickets: how many are open, how many open emergencies, the oldest open emergency's age, and reviews pending — per agency and in total. Use it for 'what is open / what is happening now'.",
+  input: OpenNowInput,
+  authorize: authorizeAgency,
+  execute: async (ctx, args) =>
+    present(ctx, await ctx.deps.operations.openNow({ agencyIds: args.agency_id ? [args.agency_id] : ctx.deps.scope.agencyIds })),
+});
+
 export const listMyAgencies = defineTool<OpsDeps, Record<string, never>>({
   name: "list_my_agencies",
   description: "The agencies you manage: their ids (to pass as agency_id), names, and acquisition/onboarding dates.",
@@ -95,4 +111,4 @@ export const listMyAgencies = defineTool<OpsDeps, Record<string, never>>({
     })),
 });
 
-export const operationsBriefTools = [listMyAgencies, getVolume, getResolution];
+export const operationsBriefTools = [listMyAgencies, getOpenNow, getVolume, getResolution];

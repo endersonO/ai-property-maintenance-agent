@@ -61,6 +61,61 @@ export const ticketStatusEvals: EvalCase<AppDeps>[] = [
       return e.failures;
     },
   },
+  {
+    id: "E15",
+    title: "Tenant quotes the short number shown in the portal: resolved among their own tickets",
+    actorId: "tenant_olivia",
+    setup: async (deps) => {
+      const { ticket } = await deps.repo.createTicketWithReview(leakTicket("tenant_olivia", "prop_mcr_1", "olivia-1"), null);
+      return { short: ticket.id.slice(0, 8), full: ticket.id };
+    },
+    runs: ({ short }) => [
+      {
+        requestId: "e15",
+        userMessage: `What happened with this ticket ${short}?`,
+        script: [
+          { toolCalls: [{ name: "get_ticket", args: { ticket_id: short } }] },
+          { text: "It's an open emergency, and a person at the agency is reviewing it." },
+        ],
+      },
+    ],
+    check: async ({ deps, results }) => {
+      const e = expectations();
+      const [get] = toolEvents(results[0]);
+      const [own] = await deps.repo.listTickets("tenant_olivia");
+      e.equal("get_ticket ok", [get?.stage, get?.status], ["execute", "ok"]);
+      e.equal("resolved ticket", get?.result.ok && (get.result.data as { ticket_id: string }).ticket_id, own.id);
+      return e.failures;
+    },
+  },
+  {
+    id: "E16",
+    title: "A short number of another tenant's ticket is 'not found', exactly like a missing one",
+    actorId: "tenant_olivia",
+    setup: async (deps) => {
+      const { ticket } = await deps.repo.createTicketWithReview(leakTicket("tenant_james", "prop_lds_1", "james-1"), null);
+      return { jamesShort: ticket.id.slice(0, 8) };
+    },
+    runs: ({ jamesShort }) => [
+      {
+        requestId: "e16",
+        userMessage: `What's happening with ${jamesShort}?`,
+        script: [
+          { toolCalls: [{ name: "get_ticket", args: { ticket_id: jamesShort } }] },
+          { toolCalls: [{ name: "get_ticket", args: { ticket_id: "00000000" } }] },
+          { text: "I can't find that ticket on your account." },
+        ],
+      },
+    ],
+    check: async ({ results }) => {
+      const e = expectations();
+      const [james, missing] = toolEvents(results[0]);
+      // Same stage, code and message: nothing tells the tenant the first one exists.
+      e.equal("someone else's", james?.result, missing?.result);
+      e.equal("code", james?.result.ok === false && james.result.code, "ticket_not_found");
+      return e.failures;
+    },
+  },
 ];
 
 export const ticketStatusAgentEvals: AgentEvalCase<AppDeps>[] = [

@@ -16,9 +16,9 @@ type CitedFact = { key: string; metric?: string; agency: string; value: number; 
 
 const CITATION = /\[([a-z0-9_.\-]+)\]/gi;
 // Numbers that are not figures: dates and period labels (2026-11-01, 2026-Q3, 2025-11..2026-10),
-// years, "per 100 homes", and coverage from the tools' notes ("2 of 3 months").
+// times (00:12), years, "per 100 homes", and coverage from the tools' notes ("2 of 3 months").
 const NOT_FIGURES =
-  /\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) \d+ months\b|\b\d+\/\d+\b/gi;
+  /\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) \d+ months\b|\b\d+\/\d+\b|\b\d{1,2}:\d{2}\b/gi;
 // Words that carry the sign of a negative change written as a magnitude.
 const DECREASE = /\b(?:down|decrease[ds]?|fell|fall|dropped|drop|lower|fewer|declined?|reduction|less)\b/i;
 // A figure, with its sign when one is written ("-5", "−5").

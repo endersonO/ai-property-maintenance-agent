@@ -50,24 +50,24 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
   const scope = await managerScope(sql, managerId);
   if (!scope) return <p className="text-muted">Unknown manager.</p>;
   const data = await operationsDashboard(sql, scope.agencyIds);
-  if (!data) return <p className="text-muted">No operations history yet. Run <code>pnpm seed:history</code>.</p>;
-
-  const all = [data.volume, data.resolution, data.emergencies, data.monthly].flatMap((r) => r.facts);
+  // Live state is always shown; the history sections only when the demonstration data exists.
+  const h = data.history;
+  const all = [...(h ? [h.volume, h.resolution, h.emergencies, h.monthly] : []), data.openNow].flatMap((r) => r.facts);
   const byKey = new Map(all.map((f) => [f.key, f]));
-  const period = data.volume.facts.find((f) => f.metric === "tickets_created" && f.agencyId === "all")?.period ?? "";
+  const period = h?.volume.facts.find((f) => f.metric === "tickets_created" && f.agencyId === "all")?.period ?? "";
   const v = (metric: string, agencyId: string, p = period): Fact | undefined => byKey.get(`${metric}.${agencyId}.${p}`);
   // Notes name agencies by id; show their names.
   const named = (note: string) => data.agencies.reduce((text, a) => text.replaceAll(a.id, a.name), note);
-  const notes = [...new Set([...data.volume.notes, ...data.resolution.notes, ...data.emergencies.notes].map(named))];
+  const notes = h ? [...new Set([...h.volume.notes, ...h.resolution.notes, ...h.emergencies.notes].map(named))] : [];
 
   // Every month of the window, from the cut-off — not just the months that returned figures.
-  const months = lastTwelveMonthKeys(data.asOf);
+  const months = h ? lastTwelveMonthKeys(h.asOf) : [];
   const emergencyMedian = (agencyId: string) => statistic(byKey, "median_hours_to_resolve_emergency", agencyId, period);
   const series: TrendSeries[] = data.agencies.map((a) => ({
     id: a.id,
     name: a.name,
     color: AGENCY_COLOR[a.id] ?? "var(--series-1)",
-    points: data.monthly.facts.filter((f) => f.agencyId === a.id).map((f) => ({ month: f.period, value: f.value })),
+    points: (h?.monthly.facts ?? []).filter((f) => f.agencyId === a.id).map((f) => ({ month: f.period, value: f.value })),
   }));
 
   return (
@@ -91,9 +91,51 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
         </button>
       </form>
 
+      <section aria-labelledby="now-heading" className="space-y-2 rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="now-heading" className="text-title font-semibold">
+            Open right now
+          </h2>
+          <p className="text-label text-muted">
+            Live tickets · {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(data.openNow.now)} UTC
+          </p>
+        </div>
+        <div tabIndex={0} role="region" aria-labelledby="now-heading" className="overflow-x-auto">
+          <table className="w-full text-body-sm">
+            <thead className="text-left text-label text-muted">
+              <tr>
+                {["Agency", "Open", "Open emergencies", "Oldest emergency", "Reviews pending"].map((h, i) => (
+                  <th key={h} scope="col" className={`border-b border-border py-1 pr-3 font-medium whitespace-nowrap ${i > 0 ? "text-right" : ""}`}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...data.agencies.map((a) => ({ id: a.id, name: a.name })), { id: "all", name: "All your agencies" }].map((a) => {
+                const emergencies = v("open_now_emergency", a.id, "now")?.value ?? 0;
+                return (
+                  <tr key={a.id} className={a.id === "all" ? "font-medium" : ""}>
+                    <th scope="row" className="py-1 pr-3 text-left font-normal">{a.name}</th>
+                    <td className="py-1 pr-3 text-right font-mono tabular-nums">{fmt(v("open_now", a.id, "now")?.value, 0)}</td>
+                    <td className={`py-1 pr-3 text-right font-mono tabular-nums ${emergencies > 0 ? "text-emergency" : ""}`}>{emergencies}</td>
+                    <td className="py-1 pr-3 text-right font-mono tabular-nums">
+                      {v("oldest_open_emergency_hours", a.id, "now") ? `${fmt(v("oldest_open_emergency_hours", a.id, "now")?.value)} h` : "—"}
+                    </td>
+                    <td className="py-1 pr-3 text-right font-mono tabular-nums">{fmt(v("reviews_pending", a.id, "now")?.value, 0)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {h ? (
+      <>
       <p role="note" className="rounded-md border border-dashed border-border-strong bg-surface px-3 py-2 text-body-sm">
-        <strong>Synthetic history</strong> for demonstration, observed up to {day(data.asOf)}. Figures for {period}, the last
-        closed quarter. Scope: {data.agencies.map((a) => a.name).join(", ")}.
+        Below: <strong>synthetic history</strong> for demonstration, observed up to {day(h.asOf)}. Figures for {period}, the
+        last closed quarter. Scope: {data.agencies.map((a) => a.name).join(", ")}.
       </p>
 
       <section aria-labelledby="kpi-heading">
@@ -115,7 +157,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
             detail={
               v("open_median_age_days", "all")
                 ? `median age ${fmt(v("open_median_age_days", "all")?.value)} days`
-                : `at ${day(data.asOf)}`
+                : `at ${day(h.asOf)}`
             }
           />
         </dl>
@@ -218,11 +260,18 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
         </p>
       </section>
 
+      </>
+      ) : (
+        <p role="note" className="rounded-md border border-dashed border-border-strong bg-surface px-3 py-2 text-body-sm text-muted">
+          No demonstration history yet, so trends aren&apos;t shown. Generate it with <code>pnpm seed:history</code>.
+        </p>
+      )}
+
       <BriefBox
         key={managerId}
         managerId={managerId}
         accessCode={typeof code === "string" ? code : null}
-        examples={["How did reports trend last quarter?", "Which agency is slowest on emergencies?"]}
+        examples={["How many emergencies are open?", "How did reports trend last quarter?", "Which agency is slowest on emergencies?"]}
       />
     </div>
   );

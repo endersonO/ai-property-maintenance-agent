@@ -1,4 +1,4 @@
-# HomeFix AI Agent
+# HomeFix Agent
 
 Portfolio prototype: AI maintenance assistant for UK residential lettings, built on a reusable agent runtime with deterministic guardrails, evals and tracing. See `README.md` for the design.
 

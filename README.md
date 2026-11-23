@@ -1,4 +1,4 @@
-# HomeFix
+# HomeFix Agent
 
 **An AI maintenance assistant for residential lettings, built on a small reusable agent runtime with deterministic guardrails, evals and tracing.**
 

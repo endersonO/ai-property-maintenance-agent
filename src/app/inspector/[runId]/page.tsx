@@ -1,4 +1,6 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+import { AppHeader } from "../../app-header";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
@@ -10,7 +12,6 @@ import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../../access-form";
 import { PriorityBadge } from "../../ui";
 import { fmtDate, fmtMs, JsonBlock, OutcomeBadge, PipelineStages, VerdictBadge } from "../components";
-import { DemoNav } from "../../site-nav";
 
 function TimelineEvent({ event }: { event: RunEventRow }) {
   const p = event.payload;
@@ -196,13 +197,15 @@ async function RunDetail({
   );
 }
 
+export const metadata: Metadata = {
+  title: "Run detail",
+  description: "One agent run: what was asked, each step, and the checks on it.",
+};
+
 export default function RunPage({ params, searchParams }: PageProps<"/inspector/[runId]">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-2 flex flex-wrap items-end justify-between gap-2">
-        <h1 className="text-title-lg font-semibold tracking-tight">Run detail</h1>
-        <DemoNav current="inspector" searchParams={searchParams} />
-      </header>
+      <AppHeader title="Run detail" current="inspector" searchParams={searchParams} />
       <Suspense fallback={<p className="text-muted">Loading run…</p>}>
         <RunDetail params={params} searchParams={searchParams} />
       </Suspense>

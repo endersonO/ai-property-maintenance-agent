@@ -52,3 +52,32 @@ export function DemoNav(props: {
     </Suspense>
   );
 }
+
+// The brand link home, keeping the demo access code like the nav links do (losing it would
+// send the visitor back to the access form and count as a failed attempt).
+async function HomeLinkWithCode({ searchParams, children }: HomeLinkProps) {
+  const { code } = await searchParams;
+  return <HomeLink code={code}>{children}</HomeLink>;
+}
+
+type HomeLinkProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  children: React.ReactNode;
+};
+
+function HomeLink({ code, children }: { code?: string | string[]; children: React.ReactNode }) {
+  const suffix = typeof code === "string" && code ? `?code=${encodeURIComponent(code)}` : "";
+  return (
+    <Link href={`/${suffix}`} aria-label="HomeFix home" className="rounded-md focus-visible:outline-2 focus-visible:outline-accent">
+      {children}
+    </Link>
+  );
+}
+
+export function DemoHomeLink(props: HomeLinkProps) {
+  return (
+    <Suspense fallback={<HomeLink>{props.children}</HomeLink>}>
+      <HomeLinkWithCode {...props} />
+    </Suspense>
+  );
+}

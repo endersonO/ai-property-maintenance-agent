@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
+import { AppHeader } from "./app-header";
 import { getSql } from "@/infra/db";
 import { PostgresRepository } from "@/infra/postgres-repository";
 import { headers } from "next/headers";
@@ -7,7 +9,6 @@ import { checkAccess } from "@/server/access";
 import { toTicketSummaries } from "@/server/chat";
 import { AccessForm } from "./access-form";
 import { PortalChat } from "./portal-chat";
-import { DemoNav } from "./site-nav";
 
 type TenantOption = { id: string; name: string; agency: string };
 
@@ -77,16 +78,20 @@ async function Portal({ searchParams }: { searchParams: PageProps<"/">["searchPa
   );
 }
 
+export const metadata: Metadata = {
+  title: "Tenant portal",
+  description: "Report a maintenance problem to your letting agency, or ask how a ticket is going.",
+};
+
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-12">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-title-lg font-semibold tracking-tight">HomeFix</h1>
-          <p className="text-body text-muted">AI-assisted maintenance · fictional data</p>
-        </div>
-        <DemoNav current="portal" searchParams={searchParams} />
-      </header>
+      <AppHeader
+        title="Tenant portal"
+        subtitle="Report a problem or ask about a ticket · fictional data"
+        current="portal"
+        searchParams={searchParams}
+      />
       <Suspense fallback={<p className="text-muted">Loading…</p>}>
         <Portal searchParams={searchParams} />
       </Suspense>

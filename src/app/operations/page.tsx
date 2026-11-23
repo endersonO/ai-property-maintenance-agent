@@ -1,4 +1,6 @@
 import { headers } from "next/headers";
+import type { Metadata } from "next";
+import { AppHeader } from "../app-header";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
@@ -8,7 +10,6 @@ import { checkAccess } from "@/server/access";
 import { clientKey } from "@/server/http";
 import { AccessForm } from "../access-form";
 import { Icon, PriorityBadge } from "../ui";
-import { DemoNav } from "../site-nav";
 import { BriefBox } from "./brief-box";
 import { lastTwelveMonthKeys } from "@/operations/periods";
 import { statistic } from "./figures";
@@ -394,16 +395,20 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
   );
 }
 
+export const metadata: Metadata = {
+  title: "Operations",
+  description: "Open incidents to attend, trends and agency comparisons, with an agent that cites every figure.",
+};
+
 export default function OperationsPage({ searchParams }: PageProps<"/operations">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-title-lg font-semibold tracking-tight">Operations</h1>
-          <p className="text-body text-muted">How maintenance is going across your agencies</p>
-        </div>
-        <DemoNav current="operations" searchParams={searchParams} />
-      </header>
+      <AppHeader
+        title="Operations"
+        subtitle="What to attend now, and how maintenance is going across your agencies"
+        current="operations"
+        searchParams={searchParams}
+      />
       <Suspense fallback={<p className="text-muted">Loading…</p>}>
         <Dashboard searchParams={searchParams} />
       </Suspense>

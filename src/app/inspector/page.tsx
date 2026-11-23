@@ -1,4 +1,6 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+import { AppHeader } from "../app-header";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { getSql } from "@/infra/db";
@@ -10,7 +12,6 @@ import { checkAccess, withCode } from "@/server/access";
 import { AccessForm } from "../access-form";
 import { ChecksCell, fmtDate, fmtMs, OutcomeBadge, RunOutcomeCell } from "./components";
 import { QualityPanel } from "./quality";
-import { DemoNav } from "../site-nav";
 
 async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["searchParams"] }) {
   await connection();
@@ -132,16 +133,20 @@ async function Runs({ searchParams }: { searchParams: PageProps<"/inspector">["s
   );
 }
 
+export const metadata: Metadata = {
+  title: "Agent Inspector",
+  description: "Quality checks on every agent run, and each run step by step.",
+};
+
 export default function InspectorPage({ searchParams }: PageProps<"/inspector">) {
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-title-lg font-semibold tracking-tight">Agent Inspector</h1>
-          <p className="text-body text-muted">Every run, step by step · newest first</p>
-        </div>
-        <DemoNav current="inspector" searchParams={searchParams} />
-      </header>
+      <AppHeader
+        title="Agent Inspector"
+        subtitle="How the agent behaves: checks on every run, and each run step by step"
+        current="inspector"
+        searchParams={searchParams}
+      />
       <Suspense fallback={<p className="text-muted">Loading runs…</p>}>
         <Runs searchParams={searchParams} />
       </Suspense>

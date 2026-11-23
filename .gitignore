@@ -37,7 +37,8 @@ npm-debug.log*
 .claude/settings.local.json
 
 # Design-system export archive (extracted into design/)
-HomeFix.zip
+# Design exports downloaded as archives
+*.zip
 
 # Browser automation screenshots and logs
 .playwright-mcp/

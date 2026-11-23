@@ -69,7 +69,7 @@ export const fmtMs = (ms: number | null) => (ms === null ? "—" : ms >= 1000 ? 
 export const fmtDate = (d: Date) =>
   new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(d);
 
-// Horizontal verdicts for one run: flagged (fail or error) stands out; pending is explicit.
+// Horizontal verdicts for one run, in words: flagged stands out; "not checked yet" is explicit.
 export function ChecksCell({ checks }: { checks: { flagged: number; pending: number } }) {
   if (checks.flagged > 0) {
     return (
@@ -79,11 +79,11 @@ export function ChecksCell({ checks }: { checks: { flagged: number; pending: num
       </span>
     );
   }
-  if (checks.pending > 0) return <span className="text-label text-muted">{checks.pending} pending</span>;
+  if (checks.pending > 0) return <span className="text-label text-muted">not checked yet</span>;
   return (
     <span className="inline-flex items-center gap-1 text-label text-ok">
       <Icon name="check" className="size-3.5" />
-      clear
+      all passed
     </span>
   );
 }
@@ -100,34 +100,54 @@ export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT }) {
   return <span className={`rounded-sm px-2 py-0.5 text-label font-medium ${VERDICT[verdict]}`}>{verdict}</span>;
 }
 
-// What a run left behind, in its current state — so "completed" (the run) is never read as
-// "resolved" (the problem).
+// What happened, as two independent facts: the run's own state (still running, failed) and what
+// it left behind now (a ticket and whether it is open). "The agent finished" is never read as
+// "the problem is solved", and a failure after creating a ticket is never hidden.
 export function RunOutcomeCell({
   outcome,
+  workflowId,
+  status,
+  error,
 }: {
   outcome: { tickets: { id: string; priority: string; status: string; escalated: boolean }[]; reviewsPending: number; reviewsTotal: number };
+  workflowId: string;
+  status: string;
+  error: string | null;
 }) {
-  if (outcome.tickets.length === 0) {
-    return (
-      <span className="text-label text-muted">
-        {outcome.reviewsTotal > 0 ? `review requested${outcome.reviewsPending ? " · pending" : ""}` : "no ticket"}
+  const runState =
+    status === "running" ? (
+      <span className="text-muted">Still running…</span>
+    ) : status === "failed" ? (
+      <span className="text-error">
+        The agent failed{outcome.tickets.length > 0 ? " after this" : ""} ({error ?? "error"})
       </span>
-    );
-  }
+    ) : null;
+  const noTicket =
+    status !== "completed"
+      ? null
+      : outcome.reviewsTotal > 0
+        ? "Passed to a person"
+        : workflowId === "maintenance"
+          ? "Replied, no ticket (asked or declined)"
+          : "Answered";
   return (
-    <span className="flex flex-col gap-0.5 text-label">
+    <span className="flex flex-col gap-0.5 text-body-sm">
       {outcome.tickets.map((t) => (
-        <span key={t.id} className="whitespace-nowrap">
-          <span className="font-mono text-muted">#{t.id.slice(0, 8)}</span>{" "}
-          <span className={t.priority === "emergency" ? "font-medium text-emergency" : ""}>{t.priority}</span>
-          {t.escalated && <span className="text-muted"> (escalated)</span>}
-          {" · "}
-          <span className={t.status === "open" || t.status === "in_progress" ? "font-medium text-foreground" : "text-muted"}>
-            {t.status === "in_progress" ? "in progress" : t.status}
+        <span key={t.id}>
+          {t.escalated ? "Escalated" : "Created"}{" "}
+          <span className={t.priority === "emergency" ? "font-medium text-emergency" : "font-medium"}>{t.priority}</span> ticket{" "}
+          <span className="font-mono text-label text-muted">#{t.id.slice(0, 8)}</span>
+          <span className="block text-label">
+            now{" "}
+            <span className={t.status === "open" || t.status === "in_progress" ? "font-medium" : "text-muted"}>
+              {t.status === "in_progress" ? "in progress" : t.status}
+            </span>
           </span>
         </span>
       ))}
-      {outcome.reviewsPending > 0 && <span className="text-review">human review pending</span>}
+      {outcome.tickets.length === 0 && noTicket && <span>{noTicket}</span>}
+      {outcome.reviewsPending > 0 && <span className="text-label text-review">waiting for a person</span>}
+      {runState}
     </span>
   );
 }

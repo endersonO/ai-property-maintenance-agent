@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { repositoryContract } from "@/domain/repository.contract";
 import type { NewTicket } from "@/domain/repository";
 import { PostgresRepository } from "@/infra/postgres-repository";
-import { getRunDetail, listRuns, qualityByEvaluator, runEvaluations, runStats } from "@/infra/inspector-queries";
+import { getRunDetail, listRuns, qualityByEvaluator, qualitySummary, runEvaluations, runStats } from "@/infra/inspector-queries";
 import { PostgresTraceStore } from "@/infra/postgres-trace-store";
 import {
   backfillEvaluations,
@@ -481,6 +481,60 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       const verdicts = await runEvaluations(sql, pendingRun.runId, evaluators);
       expect(verdicts.map((v) => v.verdict)).toEqual(evaluators.map(() => "pending"));
       expect((await runEvaluations(sql, flaggedRun.runId, evaluators)).find((v) => v.evaluatorId === "hazard_logged")?.verdict).toBe("fail");
+    });
+
+    it("the headline counts distinct runs, keeps errors apart from failures, and matches its 'any' filter", async () => {
+      // Two rules and two alarms, so a run can fail both alarms at once.
+      const four = [
+        { id: "rule_a", version: 1, kind: "invariant" as const },
+        { id: "rule_b", version: 1, kind: "invariant" as const },
+        { id: "alarm_a", version: 1, kind: "monitor" as const },
+        { id: "alarm_b", version: 1, kind: "monitor" as const },
+      ];
+      const verdicts = async (runId: string, v: Record<string, string>) => {
+        for (const [id, verdict] of Object.entries(v)) {
+          await sql`insert into run_evaluations (run_id, evaluator_id, evaluator_version, verdict) values (${runId}, ${id}, 1, ${verdict})`;
+        }
+      };
+      const finished = async () => {
+        const id = await newRun();
+        await sql`update runs set status = 'completed' where id = ${id}`;
+        return id;
+      };
+      const clean = await finished();
+      await verdicts(clean, { rule_a: "pass", rule_b: "n/a", alarm_a: "pass", alarm_b: "n/a" });
+      const twoAlarms = await finished();
+      await verdicts(twoAlarms, { rule_a: "pass", rule_b: "pass", alarm_a: "fail", alarm_b: "fail" });
+      const broken = await finished();
+      await verdicts(broken, { rule_a: "fail", rule_b: "pass", alarm_a: "fail", alarm_b: "pass" });
+      const errored = await finished();
+      await verdicts(errored, { rule_a: "error", rule_b: "pass", alarm_a: "pass", alarm_b: "pass" });
+      const pending = await finished();
+      await verdicts(pending, { rule_a: "pass" });
+      await newRun(); // still running: not counted anywhere
+
+      expect(await qualitySummary(sql, four)).toEqual({
+        finished: 5,
+        checked: 4,
+        pending: 1,
+        brokenRules: 1,
+        flagged: 1, // the run with two failed alarms counts once; the broken one isn't double-counted
+        checkErrors: 1, // an evaluator error is not a broken rule
+      });
+      // Each filter lists exactly the runs its count counts.
+      const shown = async (failing: string) => (await listRuns(sql, { evaluators: four, failing })).map((r) => r.id).sort();
+      expect(await shown("rules")).toEqual([broken]);
+      expect(await shown("alarms")).toEqual([twoAlarms]); // the broken run also failed an alarm, but is counted as broken
+      expect(await shown("errors")).toEqual([errored]);
+      expect(await shown("any")).toEqual([twoAlarms, broken, errored].sort());
+      // One evaluator, one verdict: rule_a failed in one run and couldn't run in another.
+      expect(await shown("rule_a:fail")).toEqual([broken]);
+      expect(await shown("rule_a:error")).toEqual([errored]);
+      // A bare evaluator id (links saved before verdicts were split) keeps meaning "failed or couldn't run".
+      expect(await shown("rule_a")).toEqual([broken, errored].sort());
+      // The list says when it shows only part of the matching runs.
+      const page = await listRuns(sql, { evaluators: four, failing: "any", limit: 2 });
+      expect([page.length, page[0].totalMatching]).toEqual([2, 3]);
     });
 
     it("only considers runs inside the --since window", async () => {

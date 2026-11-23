@@ -170,6 +170,12 @@ describe("redact", () => {
     expect(redact(call)).toEqual(call);
   });
 
+  it("keeps dates and times: a date-time is not a phone number", () => {
+    for (const text of ["as of 2026-11-23 00:25 UTC", "on 2026-11-23T00:25:00Z", "between 2026-11-01 and 2026-11-23"]) {
+      expect(redact(text)).toBe(text);
+    }
+  });
+
   it("redacts phone numbers in UK formats", () => {
     expect(redact("call 07700 900123 or +44 (0)7700-900-123")).toBe("call [phone] or [phone]");
   });

@@ -85,15 +85,29 @@ const ESCALATED_BY = (sql: postgres.Sql, runId: postgres.PendingQuery<postgres.R
 
 export async function listRuns(
   sql: postgres.Sql,
-  options: { limit?: number; evaluators?: { id: string; version: number }[]; failing?: string | null } = {},
-): Promise<(RunRow & { checks: RunChecks; outcome: RunOutcome })[]> {
+  options: {
+    limit?: number;
+    evaluators?: { id: string; version: number; kind?: "invariant" | "monitor" }[];
+    failing?: string | null;
+  } = {},
+): Promise<
+  (RunRow & { checks: RunChecks; outcome: RunOutcome; actorName: string | null; asked: string | null; totalMatching: number })[]
+> {
   const { limit = 50, evaluators = [], failing = null } = options;
   const ids = evaluators.map((e) => e.id);
   const versions = evaluators.map((e) => e.version);
+  const kinds = evaluators.map((e) => e.kind ?? "monitor");
+  // "<evaluator id>:fail" or "<evaluator id>:error" filters one evaluator by one verdict.
+  const [failingId, failingVerdict] = (failing ?? "").split(":");
   const rows = await sql`
-    select ${RUN_COLUMNS(sql)}, c.flagged, c.pending, o.tickets, o.reviews_pending, o.reviews_total
+    select ${RUN_COLUMNS(sql)}, c.flagged, c.pending, o.tickets, o.reviews_pending, o.reviews_total,
+           -- Who acted (a tenant or a manager) and what they asked (stored redacted).
+           coalesce(t.name, m.name) as actor_name, r.input ->> 'userMessage' as asked,
+           -- All matching runs, before the limit: the page says when it shows only part of them.
+           count(*) over () as total_matching
     from runs r
     left join tenants t on t.id = r.tenant_id
+    left join managers m on m.id = r.actor_id
     left join agencies a on a.id = r.agency_id
     cross join lateral (
       select count(*) filter (where v.verdict in ('fail', 'error')) as flagged,
@@ -115,12 +129,28 @@ export async function listRuns(
         (select count(*) from review_queue q where q.run_id = r.id and q.status = 'pending') as reviews_pending,
         (select count(*) from review_queue q where q.run_id = r.id) as reviews_total
     ) o
-    where ${failing}::text is null or exists (
-      select 1
-      from unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
-      join run_evaluations v
-        on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
-      where e.id = ${failing}::text and v.verdict in ('fail', 'error')
+    -- failing narrows the list to exactly the sets the Inspector counts (see qualitySummary):
+    --   rules  = a rule failed; alarms = an alarm failed and no rule did; errors = a check
+    --   couldn't run; any = any of those; otherwise one evaluator id (failed or couldn't run).
+    where ${failing}::text is null or (
+      with mine as (
+        select e.id, e.kind, v.verdict
+        from unnest(${ids}::text[], ${versions}::int[], ${kinds}::text[]) as e(id, version, kind)
+        join run_evaluations v
+          on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+      )
+      select case ${failing}::text
+        when 'rules' then exists (select 1 from mine where kind = 'invariant' and verdict = 'fail')
+        when 'alarms' then exists (select 1 from mine where kind = 'monitor' and verdict = 'fail')
+                       and not exists (select 1 from mine where kind = 'invariant' and verdict = 'fail')
+        when 'errors' then exists (select 1 from mine where verdict = 'error')
+        when 'any' then exists (select 1 from mine where verdict in ('fail', 'error'))
+        else exists (
+          select 1 from mine
+          where id = ${failingId}::text
+            and (${failingVerdict ?? null}::text is null and verdict in ('fail', 'error') or verdict = ${failingVerdict ?? null}::text)
+        )
+      end
     )
     order by r.created_at desc
     limit ${limit}
@@ -129,6 +159,9 @@ export async function listRuns(
     ...toRun(r),
     checks: { flagged: Number(r.flagged), pending: Number(r.pending) },
     outcome: { tickets: r.tickets, reviewsPending: Number(r.reviews_pending), reviewsTotal: Number(r.reviews_total) },
+    actorName: r.actor_name as string | null,
+    asked: r.asked as string | null,
+    totalMatching: Number(r.total_matching),
   }));
 }
 
@@ -275,4 +308,55 @@ export async function qualityByEvaluator(
     error: Number(r.error),
     pending: Number(r.pending),
   }));
+}
+
+// The Inspector's headline, counted in RUNS (a run with two failed alarms is one run), over
+// finished runs only. A confirmed failure (fail) is kept apart from a check that couldn't run
+// (error), and runs still missing a verdict are "not checked yet" — never counted as passing.
+export type QualitySummary = {
+  finished: number;
+  checked: number; // finished runs with a verdict from every current check
+  pending: number; // finished runs still missing at least one verdict
+  brokenRules: number; // runs where a rule (invariant) failed
+  flagged: number; // runs where an alarm (monitor) failed and no rule did
+  checkErrors: number; // runs where a check couldn't run
+};
+
+export async function qualitySummary(
+  sql: postgres.Sql,
+  evaluators: { id: string; version: number; kind: "invariant" | "monitor" }[],
+): Promise<QualitySummary> {
+  const ids = evaluators.map((e) => e.id);
+  const versions = evaluators.map((e) => e.version);
+  const kinds = evaluators.map((e) => e.kind);
+  const [row] = await sql`
+    with per_run as (
+      select r.id,
+             coalesce(bool_or(e.kind = 'invariant' and v.verdict = 'fail'), false) as broken,
+             coalesce(bool_or(e.kind = 'monitor' and v.verdict = 'fail'), false) as alarm,
+             coalesce(bool_or(v.verdict = 'error'), false) as errored,
+             coalesce(bool_or(v.verdict is null), false) as pending
+      from runs r
+      cross join unnest(${ids}::text[], ${versions}::int[], ${kinds}::text[]) as e(id, version, kind)
+      left join run_evaluations v
+        on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
+      where r.status <> 'running'
+      group by r.id
+    )
+    select count(*)::int as finished,
+           count(*) filter (where not pending)::int as checked,
+           count(*) filter (where pending)::int as pending,
+           count(*) filter (where broken)::int as broken_rules,
+           count(*) filter (where alarm and not broken)::int as flagged,
+           count(*) filter (where errored)::int as check_errors
+    from per_run
+  `;
+  return {
+    finished: row?.finished ?? 0,
+    checked: row?.checked ?? 0,
+    pending: row?.pending ?? 0,
+    brokenRules: row?.broken_rules ?? 0,
+    flagged: row?.flagged ?? 0,
+    checkErrors: row?.check_errors ?? 0,
+  };
 }

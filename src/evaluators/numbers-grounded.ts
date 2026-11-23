@@ -16,11 +16,12 @@ type CitedFact = { key: string; metric?: string; agency: string; value: number; 
 
 const CITATION = /\[([a-z0-9_.\-]+)\]/gi;
 // Numbers that are not figures: dates and period labels (2026-11-01, 2026-Q3, 2025-11..2026-10),
-// times (00:12), years, "per 100 homes", coverage from the tools' notes ("2 of 3 months"), and
+// times (00:12), years, "per 100 homes", coverage from the tools' notes ("2 of 3 months",
+// "8 of the 12 months"), the period's own length ("the last 12 closed months", "12-month"), and
 // full ids (a UUID's "-1234" is not a figure). Short 8-character refs are skipped only when they
 // are a prefix of an id the tools returned (see knownRefs): "12345678 runs" is still a figure.
 const NOT_FIGURES =
-  /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) \d+ months\b|\b\d+\/\d+\b|\b\d{1,2}:\d{2}\b/gi;
+  /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{4}-(?:Q[1-4]|\d{2})(?:\.\.\d{4}-\d{2})?\b|\b(?:19|20)\d{2}\b|\bper 100 homes\b|\bQ[1-4]\b|\b\d+ (?:of|out of) (?:the )?\d+ months\b|\b\d+-month\b|\b(?:last|past|previous|over|the)\s+\d+\s+(?:closed\s+|full\s+|calendar\s+)?months?\b|\b\d+\/\d+\b|\b\d{1,2}:\d{2}\b/gi;
 // Words that carry the sign of a negative change written as a magnitude.
 const DECREASE = /\b(?:down|decrease[ds]?|fell|fall|dropped|drop|lower|fewer|declined?|reduction|less)\b/i;
 // A figure, with its sign when one is written ("-5", "−5").
@@ -164,7 +165,7 @@ const CITING_WORKFLOWS = new Set(["operations-brief", "quality-analyst"]);
 
 export const numbersGrounded: Evaluator = {
   id: "numbers_grounded",
-  version: 2,
+  version: 3,
   kind: "monitor",
   description: "Every figure in an operations brief or a quality answer matches the fact it cites, for the agency it names",
   appliesTo: (run) =>

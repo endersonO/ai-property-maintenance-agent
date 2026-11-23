@@ -173,6 +173,24 @@ describe("numbers_grounded", () => {
     ]);
   });
 
+  it("the period's own length is not a figure ('the last 12 closed months'), a count of months still is", () => {
+    const real = new Map([
+      ["median.agency_northbridge.2025-11..2026-10", { key: "median.agency_northbridge.2025-11..2026-10", agency: "Northbridge Lettings", value: 5.3 }],
+    ]);
+    const reply =
+      "Over the last 12 closed months (November 2025 to October 2026), Northbridge Lettings resolved emergencies in a median of 5.3 hours [median.agency_northbridge.2025-11..2026-10].";
+    expect(checkGrounding(reply, real).map((p) => p.problem)).toEqual([]);
+    // A real production brief: period length and coverage phrasing, every figure cited.
+    const zero = { key: "tickets_in_cohort_emergency.agency_riverside.2025-11..2026-10", agency: "Riverside Homes", value: 0 };
+    const withZero = new Map([...real, [zero.key, zero]]);
+    const production =
+      `${reply} During this same 12-month period, Riverside Homes recorded 0 emergency tickets [${zero.key}], with its data covering 8 of the 12 months.`;
+    expect(checkGrounding(production, withZero).map((p) => p.problem)).toEqual([]);
+    expect(checkGrounding("Northbridge had 7 months without emergencies.", real).map((p) => p.problem)).toEqual([
+      "7 is not followed by a citation",
+    ]);
+  });
+
   it("accepts a figure quoted in backticks only when the tools returned that exact text", () => {
     const flagged = new Map([["runs_flagged_by_alarm", { key: "runs_flagged_by_alarm", agency: "all runs", value: 1 }]]);
     const context = { refs: new Set(["852ed86b"]), toolText: '{"evidence_untrusted":"25 is not followed by a citation"}' };

@@ -39,7 +39,7 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
   afterAll(() => sql.end());
 
   const reset = () =>
-    sql`truncate ticket_priority_changes, run_evaluations, review_queue, tickets, run_events, runs, synthetic_tickets, synthetic_portfolio, synthetic_history_meta`;
+    sql`truncate ticket_updates, ticket_priority_changes, run_evaluations, review_queue, tickets, run_events, runs, synthetic_tickets, synthetic_portfolio, synthetic_history_meta`;
 
   const newRun = async () => {
     const runId = randomUUID();
@@ -67,7 +67,10 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
 
   repositoryContract("PostgresRepository", async () => {
     await reset();
-    return { repo, runId: await newRun() };
+    const close = async (id: string) => {
+      await sql`update tickets set status = 'resolved', resolved_at = now() where id = ${id}`;
+    };
+    return { repo, runId: await newRun(), close };
   });
 
   describe("guarantees", () => {
@@ -125,12 +128,12 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
         workflow: maintenanceWorkflow,
         model: new ScriptedModel([
           // One rejected call (another tenant's property) and one successful create.
-          { toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_lds_1", category: "plumbing", hazards: [], location: null, description: "Leak" } }] },
+          { toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_lds_1", category: "plumbing", hazards: [], location: null, description: "Leak", new_problem: false } }] },
           {
             toolCalls: [
               {
                 name: "create_maintenance_ticket",
-                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak, email me at olivia@example.com" },
+                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak, email me at olivia@example.com", new_problem: false },
               },
             ],
           },
@@ -210,6 +213,7 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
                   hazards: ["active_water_leak"],
                   location: "kitchen ceiling",
                   description: "Water is leaking from my ceiling",
+                  new_problem: false,
                 },
               },
             ],
@@ -276,7 +280,7 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
             toolCalls: [
               {
                 name: "create_maintenance_ticket",
-                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak" },
+                args: { property_id: "prop_mcr_1", category: "plumbing", hazards: ["active_water_leak"], location: null, description: "Leak", new_problem: false },
               },
             ],
           },
@@ -1195,7 +1199,7 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
           trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge", tenantId: "tenant_olivia" } },
         });
       const create = (hazards: string[]) => ({
-        toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description: "Leak" } }],
+        toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description: "Leak", new_problem: false } }],
       });
       // A creates a routine ticket; B (a retry of the same request) escalates it to emergency.
       const a = await traced("req-same", [create([]), { text: "Logged." }]);
@@ -1213,6 +1217,38 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       expect(byRun[c.runId]).toMatchObject({ tickets: [], reviewsTotal: 1, reviewsPending: 1 });
       expect((await getRunDetail(sql, c.runId))?.tickets).toEqual([]);
       expect((await getRunDetail(sql, b.runId))?.tickets).toMatchObject([{ escalated: true, status: "open" }]);
+    });
+
+    it("a run that adds details to an older ticket shows it as updated, or escalated when it raised it", async () => {
+      const traced = (requestId: string, script: ConstructorParameters<typeof ScriptedModel>[0]) =>
+        runAgent({
+          workflow: maintenanceWorkflow,
+          model: new ScriptedModel(script),
+          deps: { repo },
+          actorId: "tenant_olivia",
+          requestId,
+          userMessage: "It's still leaking",
+          trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge", tenantId: "tenant_olivia" } },
+        });
+      const create = (hazards: string[]) => ({
+        toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description: "Damp patch", new_problem: false } }],
+      });
+      const first = await traced("req-1", [create([]), { text: "Logged." }]);
+      const [ticketRow] = await sql`select id from tickets`;
+      const add = (hazards: string[]) => ({
+        toolCalls: [{ name: "add_details_to_ticket", args: { ticket_id: ticketRow.id, details: "Still there", hazards } }],
+      });
+      const same = await traced("req-2", [add([]), { text: "I've added this to your ticket." }]);
+      // A later request that creates again is redirected to the open ticket by the guard, and raises it.
+      const worse = await traced("req-3", [create(["active_water_leak"]), { text: "I've added this to your ticket." }]);
+
+      expect(await sql`select count(*)::int as n from tickets`).toEqual([{ n: 1 }]);
+      const byRun = Object.fromEntries((await listRuns(sql)).map((r) => [r.id, r.outcome.tickets]));
+      expect(byRun[first.runId]).toMatchObject([{ escalated: false, updated: false }]);
+      expect(byRun[same.runId]).toMatchObject([{ id: ticketRow.id, escalated: false, updated: true }]);
+      expect(byRun[worse.runId]).toMatchObject([{ id: ticketRow.id, priority: "emergency", escalated: true, updated: false }]);
+      expect((await getRunDetail(sql, same.runId))?.tickets).toMatchObject([{ updated: true, escalated: false }]);
+      expect((await repo.listTicketUpdates(ticketRow.id)).map((u) => u.raisedPriority)).toEqual([false, true]);
     });
 
     it("the attention queue also lists people requested without a ticket", async () => {

@@ -40,7 +40,7 @@ function presentRun(run: RunListing, max: number) {
     asked_untrusted: clip(run.asked, max),
     status: run.status,
     error: run.error,
-    tickets: run.tickets.map((t) => ({ ticket_id: t.id, priority: t.priority, status: t.status, escalated: t.escalated })),
+    tickets: run.tickets.map((t) => ({ ticket_id: t.id, priority: t.priority, status: t.status, escalated: t.escalated, details_added: t.updated })),
     review_requested: run.reviewsTotal > 0,
     review_still_pending: run.reviewsPending > 0,
     // Only what needs attention: a failure, a check that couldn't run, or one not run yet.
@@ -156,6 +156,7 @@ function presentDetail(run: RunDetail) {
       category: t.category,
       status: t.status,
       escalated: t.escalated,
+      details_added: t.updated,
       cost_fact: `run.${r}.ticket.${ref(t.id)}.estimated_cost_gbp`,
     })),
     reviews: run.reviews.map((v) => ({ source: v.source, reason_untrusted: clip(v.reason, MAX_TEXT.listing), status: v.status })),

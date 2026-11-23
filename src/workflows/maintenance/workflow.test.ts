@@ -21,6 +21,7 @@ describe("maintenance workflow run", () => {
               hazards: ["active_water_leak"],
               location: "kitchen ceiling",
               description: "Water is leaking from my ceiling",
+              new_problem: false,
             },
           },
         ],

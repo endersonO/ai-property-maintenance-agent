@@ -6,7 +6,8 @@ import type { NewTicket, Repository } from "./repository";
 
 export function repositoryContract(
   name: string,
-  setup: () => Promise<{ repo: Repository; runId: string }>,
+  // `close` resolves a ticket the way the agency would (outside the agent's tools).
+  setup: () => Promise<{ repo: Repository; runId: string; close: (ticketId: string) => Promise<void> }>,
 ) {
   const ticket = (runId: string, overrides: Partial<NewTicket> = {}): NewTicket => ({
     agencyId: "agency_northbridge",
@@ -119,6 +120,138 @@ export function repositoryContract(
       const { repo } = await setup();
       expect(await repo.getTicket("00000000-0000-0000-0000-000000000000")).toBeNull();
       expect(await repo.getTicket("not-a-uuid")).toBeNull();
+    });
+  
+    describe("details added to an open ticket", () => {
+      const reviewFor = (runId: string) => ({
+        runId,
+        agencyId: "agency_northbridge",
+        tenantId: "tenant_olivia",
+        source: "policy" as const,
+        reason: "emergency",
+      });
+      const update = (runId: string, ticketId: string, key = "u-1") => ({
+        ticketId,
+        runId,
+        tenantId: "tenant_olivia",
+        details: "It's still leaking",
+        hazards: [] as NewTicket["hazards"],
+        idempotencyKey: key,
+      });
+      const open = async (repo: Repository, runId: string) =>
+        (await repo.createTicketWithReview(ticket(runId, { priority: "normal", hazards: [] }), null)).ticket;
+
+      it("records the details on the same ticket: no new ticket, no change when not more severe", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        const result = await repo.addTicketUpdate(update(runId, t.id), { priority: "low", hazards: [] }, null);
+        expect([result.duplicate, result.escalated, result.ticket.priority, result.review]).toEqual([false, false, "normal", null]);
+        expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+        expect((await repo.listTicketUpdates(t.id)).map((u) => [u.details, u.raisedPriority])).toEqual([["It's still leaking", false]]);
+      });
+
+      it("a more severe update escalates the ticket and adds the review the policy requires", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        const result = await repo.addTicketUpdate(
+          { ...update(runId, t.id), hazards: ["active_water_leak"] },
+          { priority: "emergency", hazards: ["active_water_leak"] },
+          reviewFor(runId),
+        );
+        expect([result.escalated, result.ticket.priority, result.ticket.hazards]).toEqual([true, "emergency", ["active_water_leak"]]);
+        expect(result.review?.ticketId).toBe(t.id);
+        expect(result.review?.reason).toMatch(/^escalated by a repeated report/);
+        expect((await repo.getTicket(t.id))?.priority).toBe("emergency");
+        expect((await repo.listTicketUpdates(t.id))[0].raisedPriority).toBe(true);
+      });
+
+      it("a retry of the same request adds the details once", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        const escalate = { priority: "emergency" as const, hazards: ["active_water_leak" as const] };
+        await repo.addTicketUpdate(update(runId, t.id), escalate, reviewFor(runId));
+        const again = await repo.addTicketUpdate(update(runId, t.id), escalate, reviewFor(runId));
+        expect([again.duplicate, again.escalated, again.review]).toEqual([true, false, null]);
+        expect(await repo.listTicketUpdates(t.id)).toHaveLength(1);
+        expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
+      });
+
+      it("a new hazard is kept on the ticket even when the priority is already the highest", async () => {
+        const { repo, runId } = await setup();
+        const { ticket: t } = await repo.createTicketWithReview(ticket(runId), null); // emergency, active_water_leak
+        const result = await repo.addTicketUpdate(
+          { ...update(runId, t.id), details: "I can smell gas too", hazards: ["gas_smell"] },
+          { priority: "emergency", hazards: ["active_water_leak", "gas_smell"] },
+          null,
+        );
+        expect([result.escalated, result.ticket.priority]).toEqual([false, "emergency"]);
+        expect((await repo.getTicket(t.id))?.hazards.sort()).toEqual(["active_water_leak", "gas_smell"]);
+        expect((await repo.listTicketUpdates(t.id))[0].raisedPriority).toBe(false);
+      });
+
+      it("a repeated create with a new hazard keeps it too, without counting as an escalation", async () => {
+        const { repo, runId } = await setup();
+        await repo.createTicketWithReview(ticket(runId), null);
+        const again = await repo.createTicketWithReview(ticket(runId, { hazards: ["gas_smell"] }), null);
+        expect([again.duplicate, again.duplicate && again.escalated]).toEqual([true, false]);
+        expect(again.ticket.hazards.sort()).toEqual(["active_water_leak", "gas_smell"]);
+      });
+
+      it("never records an update for a tenant who doesn't own the ticket", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        await expect(
+          repo.addTicketUpdate(
+            { ...update(runId, t.id), tenantId: "tenant_james" },
+            { priority: "emergency", hazards: ["active_water_leak"] },
+            null,
+          ),
+        ).rejects.toThrow(/does not belong/);
+        expect(await repo.listTicketUpdates(t.id)).toEqual([]);
+        expect((await repo.getTicket(t.id))?.priority).toBe("normal");
+      });
+
+      it("an idempotency key reused for another ticket is a conflict, not a duplicate", async () => {
+        const { repo, runId } = await setup();
+        const a = await open(repo, runId);
+        const { ticket: b } = await repo.createTicketWithReview(
+          ticket(runId, { idempotencyKey: "key-2", category: "appliance", hazards: [], priority: "normal" }),
+          null,
+        );
+        await repo.addTicketUpdate(update(runId, a.id, "same-key"), { priority: "normal", hazards: [] }, null);
+        await expect(repo.addTicketUpdate(update(runId, b.id, "same-key"), { priority: "normal", hazards: [] }, null)).rejects.toThrow(
+          /another ticket update/,
+        );
+        expect(await repo.listTicketUpdates(b.id)).toEqual([]);
+      });
+
+      it("accepts the longest details the tools can send (a 200-character location and a 2000-character description)", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        const details = `${"l".repeat(200)}: ${"d".repeat(2000)}`;
+        await repo.addTicketUpdate({ ...update(runId, t.id), details }, { priority: "normal", hazards: [] }, null);
+        expect((await repo.listTicketUpdates(t.id))[0].details).toHaveLength(2202);
+      });
+
+      it("finds an update by its idempotency key, and null for an unknown key", async () => {
+        const { repo, runId } = await setup();
+        const t = await open(repo, runId);
+        await repo.addTicketUpdate(update(runId, t.id, "find-me"), { priority: "normal", hazards: [] }, null);
+        expect((await repo.findTicketUpdateByKey("find-me"))?.ticketId).toBe(t.id);
+        expect(await repo.findTicketUpdateByKey("nope")).toBeNull();
+      });
+
+      it("refuses a closed ticket and writes nothing", async () => {
+        const { repo, runId, close } = await setup();
+        const t = await open(repo, runId);
+        await close(t.id);
+        await expect(
+          repo.addTicketUpdate(update(runId, t.id), { priority: "emergency", hazards: ["active_water_leak"] }, reviewFor(runId)),
+        ).rejects.toThrow(/resolved/);
+        expect(await repo.listTicketUpdates(t.id)).toEqual([]);
+        expect(await repo.listReviews("tenant_olivia")).toEqual([]);
+        expect((await repo.getTicket(t.id))?.priority).toBe("normal");
+      });
     });
   });
 }

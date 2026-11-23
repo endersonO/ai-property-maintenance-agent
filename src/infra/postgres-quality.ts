@@ -100,7 +100,7 @@ export class PostgresQuality implements QualityPort {
       asked: (run.input?.userMessage as string | undefined) ?? null,
       status: run.status,
       error: run.error,
-      tickets: tickets.map((t) => ({ id: t.id, priority: t.priority, status: t.status, escalated: t.escalated })),
+      tickets: tickets.map((t) => ({ id: t.id, priority: t.priority, status: t.status, escalated: t.escalated, updated: t.updated })),
       reviewsPending: reviews.filter((r) => r.status === "pending").length,
       reviewsTotal: reviews.length,
       checks: await this.checksOf(run.id),

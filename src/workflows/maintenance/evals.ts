@@ -20,6 +20,7 @@ const dishwasher = (propertyId: string) => ({
   hazards: [],
   location: "kitchen",
   description: "My dishwasher stopped working",
+  new_problem: false,
 });
 
 const leak = {
@@ -28,6 +29,7 @@ const leak = {
   hazards: ["active_water_leak"],
   location: "kitchen ceiling",
   description: "Water is leaking from my ceiling",
+  new_problem: false,
 };
 
 const toolEvents = (result: RunResult) =>
@@ -193,7 +195,7 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
   },
   {
     id: "E9",
-    title: "Two separate requests, same category, same day: two tickets, second an emergency",
+    title: "Two different problems, same category, same day (new_problem: true): two tickets, second an emergency",
     actorId: "tenant_olivia",
     runs: [
       {
@@ -208,13 +210,40 @@ export const maintenanceEvals: EvalCase<AppDeps>[] = [
       {
         requestId: "e9-afternoon",
         userMessage: "Now water is leaking from my ceiling!",
-        script: [getContext, create(leak), { text: "Emergency ticket created." }],
+        script: [getContext, create({ ...leak, new_problem: true }), { text: "Emergency ticket created." }],
       },
     ],
     check: async ({ deps }) => {
       const e = expectations();
       const priorities = (await deps.repo.listTickets("tenant_olivia")).map((t) => t.priority).sort();
       e.equal("ticket priorities", priorities, ["emergency", "normal"]);
+      return e.failures;
+    },
+  },
+  {
+    id: "E24",
+    title: "'Still leaking, did you get my report?' adds to the open ticket and escalates it: no duplicate",
+    actorId: "tenant_olivia",
+    runs: [
+      {
+        requestId: "e24-first",
+        userMessage: "There's a damp patch on the kitchen ceiling",
+        script: [getContext, create({ ...leak, hazards: [], description: "Damp patch on the ceiling" }), { text: "Ticket created." }],
+      },
+      {
+        requestId: "e24-again",
+        userMessage: "It's still leaking from the ceiling and dripping a lot now, did you get my report?",
+        // The model forgets the open ticket and creates again: the duplicate guard adds it instead.
+        script: [getContext, create(leak), { text: "Yes — I've added this to your ticket and it is now an emergency, sent for review." }],
+      },
+    ],
+    check: async ({ deps, results }) => {
+      const e = expectations();
+      const tickets = await deps.repo.listTickets("tenant_olivia");
+      e.equal("tickets", tickets.map((t) => t.priority), ["emergency"]);
+      e.equal("updates", (await deps.repo.listTicketUpdates(tickets[0]?.id ?? "")).length, 1);
+      e.equal("reviews", (await deps.repo.listReviews("tenant_olivia")).map((r) => r.ticketId), [tickets[0]?.id]);
+      e.equal("second run outcome", results[1].status, "completed");
       return e.failures;
     },
   },

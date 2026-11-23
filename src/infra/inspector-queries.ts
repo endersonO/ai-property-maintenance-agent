@@ -66,21 +66,30 @@ const RUN_COLUMNS = (sql: postgres.Sql) => sql`
 export type RunChecks = { flagged: number; pending: number };
 
 // What a run left behind, in its CURRENT state: tickets it created, tickets it escalated (taken
-// from the create tool's recorded result, escalated: true — an escalated ticket keeps the run id
-// of the run that created it), and its reviews. A review requested for an older ticket is a
+// from the create tool's recorded result, escalated: true, or from an update that raised the
+// priority — an escalated ticket keeps the run id of the run that created it), tickets it only
+// added details to (updated), and its reviews. A review requested for an older ticket is a
 // review, not an escalation.
 export type RunOutcome = {
-  tickets: { id: string; priority: string; status: string; escalated: boolean }[];
+  tickets: { id: string; priority: string; status: string; escalated: boolean; updated: boolean }[];
   reviewsPending: number;
   reviewsTotal: number;
 };
 
-// Ticket ids a run escalated, from its recorded create_maintenance_ticket results.
+// Ticket ids a run escalated: from its recorded create_maintenance_ticket results, or from
+// details it added that raised the priority.
 const ESCALATED_BY = (sql: postgres.Sql, runId: postgres.PendingQuery<postgres.Row[]>) => sql`
   select e.payload -> 'result' -> 'data' ->> 'ticket_id'
   from run_events e
   where e.run_id = ${runId} and e.type = 'tool_call' and e.tool_name = 'create_maintenance_ticket'
     and e.status = 'ok' and (e.payload -> 'result' -> 'data' ->> 'escalated') = 'true'
+  union
+  select u.ticket_id::text from ticket_updates u where u.run_id = ${runId} and u.raised_priority
+`;
+
+// Ticket ids a run added details to (whether or not that raised them).
+const UPDATED_BY = (sql: postgres.Sql, runId: postgres.PendingQuery<postgres.Row[]>) => sql`
+  select u.ticket_id::text from ticket_updates u where u.run_id = ${runId}
 `;
 
 export async function listRuns(
@@ -121,11 +130,15 @@ export async function listRuns(
     cross join lateral (
       select
         coalesce((
-          select json_agg(json_build_object('id', tk.id, 'priority', tk.priority, 'status', tk.status,
-                                            'escalated', tk.run_id is distinct from r.id) order by tk.created_at)
+          select json_agg(json_build_object(
+                   'id', tk.id, 'priority', tk.priority, 'status', tk.status,
+                   'escalated', tk.run_id is distinct from r.id and tk.id::text in (${ESCALATED_BY(sql, sql`r.id`)}),
+                   'updated', tk.run_id is distinct from r.id and tk.id::text not in (${ESCALATED_BY(sql, sql`r.id`)})
+                 ) order by tk.created_at)
           from tickets tk
           where tk.run_id = r.id
              or tk.id::text in (${ESCALATED_BY(sql, sql`r.id`)})
+             or tk.id::text in (${UPDATED_BY(sql, sql`r.id`)})
         ), '[]'::json) as tickets,
         (select count(*) from review_queue q where q.run_id = r.id and q.status = 'pending') as reviews_pending,
         (select count(*) from review_queue q where q.run_id = r.id) as reviews_total
@@ -219,10 +232,13 @@ export async function getRunDetail(sql: postgres.Sql, runId: string) {
   const [events, tickets, reviews] = await Promise.all([
     sql`select seq, type, tool_name, stage, status, duration_ms, payload from run_events where run_id = ${runId} order by seq`,
     sql`
-      select id, priority, category, policy_version, estimated_cost_gbp, status, run_id <> ${runId} as escalated
+      select id, priority, category, policy_version, estimated_cost_gbp, status,
+             run_id <> ${runId} and id::text in (${ESCALATED_BY(sql, sql`${runId}::uuid`)}) as escalated,
+             run_id <> ${runId} and id::text not in (${ESCALATED_BY(sql, sql`${runId}::uuid`)}) as updated
       from tickets
       where run_id = ${runId}
          or id::text in (${ESCALATED_BY(sql, sql`${runId}::uuid`)})
+         or id::text in (${UPDATED_BY(sql, sql`${runId}::uuid`)})
     `,
     sql`select source, reason, status, ticket_id from review_queue where run_id = ${runId}`,
   ]);
@@ -249,6 +265,8 @@ export async function getRunDetail(sql: postgres.Sql, runId: string) {
       // Its state now, not when the run ended.
       status: t.status as string,
       escalated: t.escalated as boolean,
+      // Details added by this run, priority unchanged.
+      updated: t.updated as boolean,
     })),
     reviews: reviews.map((r) => ({
       source: r.source as string,

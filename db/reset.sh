@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
-  "drop view if exists ops.operations_tickets; drop function if exists tickets_require_transition_dates() cascade; drop function if exists tickets_record_priority_change() cascade; drop table if exists history_tracking, ticket_priority_changes, synthetic_history_meta, synthetic_portfolio, synthetic_tickets, manager_agencies, managers, run_evaluations, review_queue, tickets, run_events, runs, tenants, properties, policies, agencies cascade;"
+  "drop view if exists ops.operations_tickets; drop function if exists tickets_require_transition_dates() cascade; drop function if exists tickets_record_priority_change() cascade; drop table if exists ticket_updates, history_tracking, ticket_priority_changes, synthetic_history_meta, synthetic_portfolio, synthetic_tickets, manager_agencies, managers, run_evaluations, review_queue, tickets, run_events, runs, tenants, properties, policies, agencies cascade;"
 
 # Each migration is atomic (-1): it applies completely or not at all, and nothing it installs
 # (e.g. a trigger and the mark of when it started recording) can be seen half-done.

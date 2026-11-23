@@ -47,6 +47,7 @@ const createLeak: ScriptStep = {
         hazards: ["active_water_leak"],
         location: "ceiling",
         description: "Water is leaking from the ceiling",
+        new_problem: false,
       },
     },
   ],

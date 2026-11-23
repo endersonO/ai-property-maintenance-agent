@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { repositoryContract } from "@/domain/repository.contract";
 import { InMemoryRepository } from "./memory-repository";
 
-repositoryContract("InMemoryRepository", async () => ({
-  repo: new InMemoryRepository(),
-  runId: "run-test",
-}));
+repositoryContract("InMemoryRepository", async () => {
+  const repo = new InMemoryRepository();
+  return { repo, runId: "run-test", close: async (id: string) => repo.closeTicket(id) };
+});
 
 describe("InMemoryRepository faults", () => {
   it("a failing review insert leaves no ticket behind", async () => {

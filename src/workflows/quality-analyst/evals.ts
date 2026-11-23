@@ -41,9 +41,9 @@ const RUN_WITH_TICKET: RunDetail = {
   asked: "The kitchen tap has been dripping for a week.",
   checks: [{ checkId: "claims_match_actions", verdict: "pass", evidence: "a ticket was created" }],
   reply: "Ticket created.",
-  tickets: [{ id: "b7e0a915-0000-4000-8000-000000000003", priority: "normal", status: "open", escalated: false }],
+  tickets: [{ id: "b7e0a915-0000-4000-8000-000000000003", priority: "normal", status: "open", escalated: false, updated: false }],
   ticketDetails: [
-    { id: "b7e0a915-0000-4000-8000-000000000003", priority: "normal", category: "plumbing", estimatedCostGbp: 160, status: "open", escalated: false },
+    { id: "b7e0a915-0000-4000-8000-000000000003", priority: "normal", category: "plumbing", estimatedCostGbp: 160, status: "open", escalated: false, updated: false },
   ],
 };
 

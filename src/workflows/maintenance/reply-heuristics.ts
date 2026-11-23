@@ -55,3 +55,16 @@ const affirms = (clause: string, claim: RegExp) => {
 export function claimsTicketCreated(reply: string): boolean {
   return statements(reply).some((clause) => CLAIMS.some((claim) => affirms(clause, claim)));
 }
+
+// "I've updated your ticket", "I've added this to your ticket", "your ticket has been updated".
+// Must name a ticket-like object, like the created claims.
+const UPDATE_OBJECT = String.raw`(?:your|the)\s+(?:existing\s+|open\s+|current\s+)?(?:(?:maintenance|repair)\s+)?(?:tickets?|reports?|requests?|cases?|jobs?)\b`;
+const UPDATE_CLAIMS = [
+  new RegExp(String.raw`\bi(?:'ve| have)?\s+(?:just\s+)?(?:updated|amended)\s+` + UPDATE_OBJECT, "i"),
+  new RegExp(String.raw`\bi(?:'ve| have)?\s+(?:just\s+)?added\b[^.!?]{0,60}?\bto\s+` + UPDATE_OBJECT, "i"),
+  new RegExp(OBJECT + String.raw`[^.!?]{0,40}?\b(?:has been|have been|was|is now)\s+(?:updated|amended)\b`, "i"),
+];
+
+export function claimsTicketUpdated(reply: string): boolean {
+  return statements(reply).some((clause) => UPDATE_CLAIMS.some((claim) => affirms(clause, claim)));
+}

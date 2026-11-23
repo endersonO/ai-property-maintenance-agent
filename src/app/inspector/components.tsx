@@ -109,7 +109,7 @@ export function RunOutcomeCell({
   status,
   error,
 }: {
-  outcome: { tickets: { id: string; priority: string; status: string; escalated: boolean }[]; reviewsPending: number; reviewsTotal: number };
+  outcome: { tickets: { id: string; priority: string; status: string; escalated: boolean; updated: boolean }[]; reviewsPending: number; reviewsTotal: number };
   workflowId: string;
   status: string;
   error: string | null;
@@ -134,7 +134,7 @@ export function RunOutcomeCell({
     <span className="flex flex-col gap-0.5 text-body-sm">
       {outcome.tickets.map((t) => (
         <span key={t.id}>
-          {t.escalated ? "Escalated" : "Created"}{" "}
+          {t.escalated ? "Escalated" : t.updated ? "Added details to" : "Created"}{" "}
           <span className={t.priority === "emergency" ? "font-medium text-emergency" : "font-medium"}>{t.priority}</span> ticket{" "}
           <span className="font-mono text-label text-muted">#{t.id.slice(0, 8)}</span>
           <span className="block text-label">

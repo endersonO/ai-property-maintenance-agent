@@ -7,8 +7,12 @@ export type TicketEffect = {
   ticketId: string;
   priority: string;
   // created: new ticket · escalated: an existing ticket raised by this run ·
-  // existing: a plain repeat returned the ticket unchanged.
-  origin: "created" | "escalated" | "existing";
+  // existing: a plain repeat returned the ticket unchanged ·
+  // updated: details added to an open ticket, priority unchanged.
+  origin: "created" | "escalated" | "existing" | "updated";
+  // How: a create call (new ticket, or a retry of the same request), or details added to an
+  // open ticket (add_details_to_ticket, or a create the duplicate guard redirected).
+  via: "create" | "add";
   // A review was written in this run for this ticket.
   reviewed: boolean;
 };
@@ -19,7 +23,10 @@ type CreateData = {
   duplicate: boolean;
   escalated?: boolean;
   sent_to_human_review?: boolean;
+  added_to_existing_ticket?: boolean;
 };
+
+const ADDS = new Set(["create_maintenance_ticket", "add_details_to_ticket"]);
 
 export function ticketEffects(run: EvaluableRun): TicketEffect[] {
   const agentReviews = new Set(
@@ -30,13 +37,23 @@ export function ticketEffects(run: EvaluableRun): TicketEffect[] {
     ),
   );
   return run.toolCalls.flatMap((c) => {
-    if (c.name !== "create_maintenance_ticket" || !c.result.ok) return [];
+    if (!ADDS.has(c.name) || !c.result.ok) return [];
     const data = c.result.data as CreateData;
+    const added = data.added_to_existing_ticket === true;
     return [
       {
         ticketId: data.ticket_id,
         priority: data.priority,
-        origin: !data.duplicate ? "created" : data.escalated ? "escalated" : "existing",
+        via: added ? ("add" as const) : ("create" as const),
+        origin: added
+          ? data.escalated
+            ? "escalated"
+            : "updated"
+          : !data.duplicate
+            ? "created"
+            : data.escalated
+              ? "escalated"
+              : "existing",
         reviewed: data.sent_to_human_review === true || agentReviews.has(data.ticket_id),
       },
     ];

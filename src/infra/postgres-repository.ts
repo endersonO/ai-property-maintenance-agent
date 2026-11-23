@@ -3,7 +3,10 @@ import { Policy } from "@/domain/policy";
 import {
   planDuplicate,
   type ActivePolicy,
+  type AddUpdateResult,
   type CreateTicketResult,
+  type NewTicketUpdate,
+  type TicketUpdate,
   type NewReview,
   type NewTicket,
   type Repository,
@@ -35,6 +38,18 @@ const toTicket = (r: Row): Ticket => ({
   estimatedCostGbp: Number(r.estimated_cost_gbp),
   policyVersion: r.policy_version as number,
   idempotencyKey: r.idempotency_key as string,
+  createdAt: r.created_at as Date,
+});
+
+const toUpdate = (r: Row): TicketUpdate => ({
+  id: r.id as string,
+  ticketId: r.ticket_id as string,
+  runId: r.run_id as string,
+  tenantId: r.tenant_id as string,
+  details: r.details as string,
+  hazards: r.hazards as TicketUpdate["hazards"],
+  idempotencyKey: r.idempotency_key as string,
+  raisedPriority: r.raised_priority as boolean,
   createdAt: r.created_at as Date,
 });
 
@@ -122,7 +137,7 @@ export class PostgresRepository implements Repository {
           `;
           added = toReview(reviewRow);
         }
-        return { duplicate: true as const, ticket, review: added, escalated: plan.update !== null };
+        return { duplicate: true as const, ticket, review: added, escalated: plan.raised };
       }
 
       const ticket = toTicket(inserted);
@@ -136,6 +151,73 @@ export class PostgresRepository implements Repository {
       `;
       return { duplicate: false as const, ticket, review: toReview(reviewRow) };
     }) as Promise<CreateTicketResult>;
+  }
+
+  async addTicketUpdate(
+    u: NewTicketUpdate,
+    incoming: Pick<NewTicket, "priority" | "hazards">,
+    review: Omit<NewReview, "ticketId"> | null,
+  ): Promise<AddUpdateResult> {
+    return this.sql.begin(async (tx) => {
+      // Lock the ticket first: concurrent updates apply one at a time, and a retry that waited
+      // sees the update its first attempt committed.
+      const [row] = await tx`select * from tickets where id = ${u.ticketId} for update`;
+      if (!row) throw new Error(`Ticket ${u.ticketId} not found`);
+      const existing = toTicket(row);
+      // The caller's tenant must own the ticket: an update is never recorded on someone else's.
+      if (existing.tenantId !== u.tenantId) throw new Error(`Ticket ${existing.id} does not belong to ${u.tenantId}`);
+      const [repeated] = await tx`select * from ticket_updates where idempotency_key = ${u.idempotencyKey}`;
+      if (repeated) {
+        // A key reused for a different ticket or tenant is a conflict, never a confirmation.
+        if (repeated.ticket_id !== u.ticketId || repeated.tenant_id !== u.tenantId) {
+          throw new Error("Idempotency key already used for another ticket update");
+        }
+        return { duplicate: true, ticket: existing, update: toUpdate(repeated), review: null, escalated: false };
+      }
+      if (existing.status === "resolved" || existing.status === "cancelled") {
+        throw new Error(`Ticket ${existing.id} is ${existing.status}`);
+      }
+      const [{ has_review }] = await tx`
+        select exists (select 1 from review_queue where ticket_id = ${existing.id}) as has_review
+      `;
+      const plan = planDuplicate(existing, incoming, review, has_review);
+      let ticket = existing;
+      if (plan.update) {
+        const [updated] = await tx`
+          update tickets set priority = ${plan.update.priority}, hazards = ${plan.update.hazards}::text[]
+          where id = ${existing.id}
+          returning *
+        `;
+        ticket = toTicket(updated);
+      }
+      const [updateRow] = await tx`
+        insert into ticket_updates (ticket_id, run_id, tenant_id, details, hazards, raised_priority, idempotency_key)
+        values (${u.ticketId}, ${u.runId}, ${u.tenantId}, ${u.details}, ${u.hazards}::text[], ${plan.raised}, ${u.idempotencyKey})
+        returning *
+      `;
+      let added: Review | null = null;
+      if (plan.review) {
+        const [reviewRow] = await tx`
+          insert into review_queue (run_id, agency_id, tenant_id, ticket_id, source, reason)
+          values (${plan.review.runId}, ${plan.review.agencyId}, ${plan.review.tenantId}, ${existing.id},
+                  ${plan.review.source}, ${plan.review.reason})
+          returning *
+        `;
+        added = toReview(reviewRow);
+      }
+      return { duplicate: false, ticket, update: toUpdate(updateRow), review: added, escalated: plan.raised };
+    }) as Promise<AddUpdateResult>;
+  }
+
+  async listTicketUpdates(ticketId: string): Promise<TicketUpdate[]> {
+    if (!UUID.test(ticketId)) return [];
+    const rows = await this.sql`select * from ticket_updates where ticket_id = ${ticketId} order by created_at, id`;
+    return rows.map(toUpdate);
+  }
+
+  async findTicketUpdateByKey(idempotencyKey: string): Promise<TicketUpdate | null> {
+    const [row] = await this.sql`select * from ticket_updates where idempotency_key = ${idempotencyKey}`;
+    return row ? toUpdate(row) : null;
   }
 
   async createReview(r: NewReview): Promise<Review> {

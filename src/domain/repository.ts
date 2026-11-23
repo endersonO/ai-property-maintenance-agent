@@ -50,32 +50,56 @@ export type CreateTicketResult =
   // severe repeat escalates it (see planDuplicate); `review` is then the review this call added.
   | { duplicate: true; ticket: Ticket; review: Review | null; escalated: boolean };
 
+// Details a tenant adds to one of their open tickets.
+export type NewTicketUpdate = {
+  ticketId: string;
+  runId: string;
+  tenantId: string;
+  details: string;
+  hazards: Hazard[];
+  // Retries of the same request add the details once.
+  idempotencyKey: string;
+};
+
+export type TicketUpdate = NewTicketUpdate & { id: string; raisedPriority: boolean; createdAt: Date };
+
+export type AddUpdateResult =
+  // duplicate: a retry of the same request; nothing was written again.
+  { duplicate: boolean; ticket: Ticket; update: TicketUpdate; review: Review | null; escalated: boolean };
+
 // Lower index = more severe.
 const severity = (p: Priority) => Priority.options.indexOf(p);
 
 export type DuplicatePlan = {
   // Ticket fields to update, or null when the ticket stays as it is.
   update: Pick<Ticket, "priority" | "hazards"> | null;
+  // The priority went up (an escalation). New hazards alone update the ticket without raising it.
+  raised: boolean;
   // Review to add for the existing ticket, or null.
   review: Omit<NewReview, "ticketId"> | null;
 };
 
-// Pure decision for a repeated idempotency key, shared by every Repository implementation.
-// Deduplication must never swallow an escalation: if the repeat is more severe (e.g. the
-// model first missed the leak, then reported it), the ticket's priority goes up and the
-// review the policy now requires is added. A plain repeat writes nothing.
+// Pure decision for a repeated report on an existing ticket — the same request retried, or
+// details added to an open ticket — shared by every Repository implementation. It must never
+// swallow an escalation: if the repeat is more severe (e.g. the model first missed the leak,
+// then reported it), the ticket's priority goes up and the review the policy now requires is
+// added. It never downgrades. A plain repeat changes nothing.
 export function planDuplicate(
   existing: Ticket,
-  incoming: NewTicket,
+  incoming: Pick<NewTicket, "priority" | "hazards">,
   review: Omit<NewReview, "ticketId"> | null,
   existingHasReview: boolean,
 ): DuplicatePlan {
   const raised = severity(incoming.priority) < severity(existing.priority);
   const hazards = [...new Set([...existing.hazards, ...incoming.hazards])];
-  const update = raised ? { priority: incoming.priority, hazards } : null;
+  // A new hazard is always kept on the ticket, even when the priority is already at its highest
+  // (a gas smell reported on an emergency leak ticket).
+  const newHazards = hazards.length > existing.hazards.length;
+  const update = raised || newHazards ? { priority: raised ? incoming.priority : existing.priority, hazards } : null;
   const needsReview = review !== null && (raised || !existingHasReview);
   return {
     update,
+    raised,
     review: needsReview
       ? { ...review, reason: raised ? `escalated by a repeated report: ${review.reason}` : review.reason }
       : null,
@@ -91,6 +115,16 @@ export interface Repository {
     review: Omit<NewReview, "ticketId"> | null,
   ): Promise<CreateTicketResult>;
   createReview(review: NewReview): Promise<Review>;
+  // Atomic: the details, any escalation (planDuplicate) and its review, or nothing. `incoming`
+  // is the policy's decision for the ticket with the new hazards. Throws if the ticket is closed.
+  addTicketUpdate(
+    update: NewTicketUpdate,
+    incoming: Pick<NewTicket, "priority" | "hazards">,
+    review: Omit<NewReview, "ticketId"> | null,
+  ): Promise<AddUpdateResult>;
+  listTicketUpdates(ticketId: string): Promise<TicketUpdate[]>;
+  // What a request already did, so a retry returns it instead of choosing again.
+  findTicketUpdateByKey(idempotencyKey: string): Promise<TicketUpdate | null>;
   getTicket(ticketId: string): Promise<Ticket | null>;
   listTickets(tenantId: string): Promise<Ticket[]>;
   listReviews(tenantId: string): Promise<Review[]>;

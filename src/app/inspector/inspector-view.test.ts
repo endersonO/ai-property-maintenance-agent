@@ -7,7 +7,7 @@ import { evaluators } from "@/evaluators";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 const noTickets = { tickets: [], reviewsPending: 0, reviewsTotal: 0 };
-const leak = { tickets: [{ id: "547bf635-453a-4d69-ad12-efbd3662f1da", priority: "emergency", status: "open", escalated: false }], reviewsPending: 1, reviewsTotal: 1 };
+const leak = { tickets: [{ id: "547bf635-453a-4d69-ad12-efbd3662f1da", priority: "emergency", status: "open", escalated: false, updated: false }], reviewsPending: 1, reviewsTotal: 1 };
 
 describe("Inspector view", () => {
   it("a running run is 'still running', never 'replied' or 'answered'", () => {
@@ -20,6 +20,13 @@ describe("Inspector view", () => {
     const html = text(renderToString(createElement(RunOutcomeCell, { outcome: leak, workflowId: "maintenance", status: "failed", error: "timeout" })));
     expect(html).toContain("Created emergency ticket #547bf635");
     expect(html).toContain("The agent failed after this (timeout)");
+  });
+
+  it("a run that only added details to an older ticket says so, not 'Created' or 'Escalated'", () => {
+    const updated = { ...leak, tickets: [{ ...leak.tickets[0], updated: true }], reviewsPending: 0, reviewsTotal: 0 };
+    const html = text(renderToString(createElement(RunOutcomeCell, { outcome: updated, workflowId: "maintenance", status: "completed", error: null })));
+    expect(html).toContain("Added details to emergency ticket #547bf635");
+    expect(html).not.toMatch(/Created|Escalated/);
   });
 
   const summary = { finished: 3, checked: 0, pending: 3, brokenRules: 0, flagged: 0, checkErrors: 0 };

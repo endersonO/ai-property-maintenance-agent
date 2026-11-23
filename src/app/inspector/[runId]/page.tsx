@@ -168,6 +168,7 @@ async function RunDetail({
                   <PriorityBadge priority={t.priority} />
                   <span className="font-medium">{t.status === "in_progress" ? "in progress" : t.status} now</span>
                   {t.escalated && <span className="text-label text-muted">escalated by this run (created earlier)</span>}
+                  {t.updated && <span className="text-label text-muted">details added by this run (created earlier)</span>}
                 </p>
                 <p>
                   {t.category} · £{t.estimatedCostGbp.toFixed(2)} estimate · decided by policy v{t.policyVersion}

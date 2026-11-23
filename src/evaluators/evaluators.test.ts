@@ -55,7 +55,7 @@ const create = (hazards: string[], description = "Problem"): ScriptStep => ({
   toolCalls: [
     {
       name: "create_maintenance_ticket",
-      args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description },
+      args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description, new_problem: false },
     },
   ],
 });
@@ -373,5 +373,44 @@ describe("mentionsHazard on the agent-eval messages", () => {
 
   it.each(maintenanceAgentEvals.map((c) => [c.id, c.userMessage] as const))("%s: %s", (id, message) => {
     expect(mentionsHazard(message) !== null).toBe(expected[id]);
+  });
+});
+
+describe("claims_match_actions: created vs updated", () => {
+  const added = (escalated: boolean) => ({
+    name: "add_details_to_ticket",
+    args: { ticket_id: "t-1", details: "More", hazards: [] },
+    result: { ok: true, data: { ticket_id: "t-1", added_to_existing_ticket: true, escalated, priority: "high", sent_to_human_review: false } },
+  });
+  const created = {
+    name: "create_maintenance_ticket",
+    args: {},
+    result: { ok: true, data: { ticket_id: "t-2", duplicate: false, priority: "high", sent_to_human_review: false } },
+  };
+  const run = (output: string, toolCalls: unknown[]) =>
+    ({ workflowId: "maintenance", output, userMessage: "It's the whole house", toolCalls, status: "completed", history: [] }) as unknown as EvaluableRun;
+  const check = (r: EvaluableRun) => (claimsMatchActions.appliesTo(r) ? claimsMatchActions.evaluate(r) : { verdict: "n/a" });
+
+  it("passes 'I've added this to your ticket' when details were added", () => {
+    expect(check(run("I've added this to your ticket.", [added(false)]))).toMatchObject({ verdict: "pass" });
+  });
+
+  it("fails 'I have updated your ticket' when the run created a second ticket instead (the real follow-up bug)", () => {
+    const reply = "I have updated your maintenance ticket to include that there is no hot water and that your boiler shows an error.";
+    expect(check(run(reply, [created]))).toMatchObject({
+      verdict: "fail",
+      evidence: "reply says a ticket was updated, but the run created ticket t-2 instead",
+    });
+  });
+
+  it("fails 'I've created a ticket' when the details went to an existing ticket", () => {
+    expect(check(run("I've created a new ticket for this.", [added(false)]))).toMatchObject({
+      verdict: "fail",
+      evidence: expect.stringContaining("added to existing ticket t-1"),
+    });
+  });
+
+  it("a negated update ('I haven't updated your ticket') is not a claim", () => {
+    expect(check(run("I haven't updated your ticket yet. Can you tell me more?", []))).toMatchObject({ verdict: "n/a" });
   });
 });

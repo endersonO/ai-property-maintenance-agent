@@ -6,7 +6,9 @@ import { ticketEffects } from "./effects";
 // against regressions; whether the model *reported* the hazard is hazard_logged's job.
 
 const emergencies = (run: Parameters<Evaluator["evaluate"]>[0]) =>
-  ticketEffects(run).filter((t) => t.priority === "emergency" && t.origin !== "existing");
+  // An unchanged ticket (a plain repeat, or details that didn't raise it) was reviewed when it
+  // became an emergency; only a ticket this run created or escalated needs its review now.
+  ticketEffects(run).filter((t) => t.priority === "emergency" && (t.origin === "created" || t.origin === "escalated"));
 
 export const emergencyReviewed: Evaluator = {
   id: "emergency_reviewed",

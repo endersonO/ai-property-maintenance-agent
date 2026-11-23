@@ -44,7 +44,7 @@ export type RunListing = {
   asked: string | null;
   status: string;
   error: string | null;
-  tickets: { id: string; priority: string; status: string; escalated: boolean }[];
+  tickets: { id: string; priority: string; status: string; escalated: boolean; updated: boolean }[];
   reviewsPending: number;
   reviewsTotal: number;
   checks: { checkId: string; verdict: Verdict; evidence: string }[];
@@ -53,7 +53,7 @@ export type RunListing = {
 export type RunDetail = RunListing & {
   reply: string | null;
   toolCalls: { tool: string; stage: string | null; status: string; code: string | null }[];
-  ticketDetails: { id: string; priority: string; category: string; estimatedCostGbp: number; status: string; escalated: boolean }[];
+  ticketDetails: { id: string; priority: string; category: string; estimatedCostGbp: number; status: string; escalated: boolean; updated: boolean }[];
   reviews: { source: string; reason: string; status: string }[];
 };
 

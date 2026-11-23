@@ -7,8 +7,8 @@ import { maintenanceTools } from "./tools";
 
 // Tool-level checks through the real executor and in-memory repository (no model yet).
 
-function setup(tenantId: string, requestId = "req-1") {
-  const repo = new InMemoryRepository();
+// Pass a repo to act as another tenant on the same data.
+function setup(tenantId: string, requestId = "req-1", repo = new InMemoryRepository()) {
   const ctx: ToolContext<AppDeps> = { runId: "run-1", requestId, actorId: tenantId, deps: { repo } };
   const call = (name: string, args: unknown, c = ctx) => executeToolCall(maintenanceTools, { name, args }, c);
   return { repo, ctx, call };
@@ -20,6 +20,7 @@ const dishwasher = (propertyId: string) => ({
   hazards: [],
   location: "kitchen",
   description: "My dishwasher stopped working",
+  new_problem: false,
 });
 
 const leak = {
@@ -28,6 +29,7 @@ const leak = {
   hazards: ["active_water_leak"],
   location: "kitchen ceiling",
   description: "Water is leaking from my ceiling",
+  new_problem: false,
 };
 
 describe("create_maintenance_ticket", () => {
@@ -102,17 +104,155 @@ describe("create_maintenance_ticket", () => {
     expect(await repo.listReviews("tenant_olivia")).toHaveLength(1);
   });
 
-  it("separate requests, same category, same day: two tickets, the second an emergency", async () => {
+  it("a different problem of the same category, declared new_problem: two tickets, the second an emergency", async () => {
     const { repo, ctx, call } = setup("tenant_olivia", "req-morning");
-    await call("create_maintenance_ticket", {
-      ...leak,
-      hazards: [],
-      location: "bathroom",
-      description: "Dripping tap",
-    });
-    const afternoon = await call("create_maintenance_ticket", leak, { ...ctx, requestId: "req-afternoon" });
+    await call("create_maintenance_ticket", { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" });
+    const afternoon = await call("create_maintenance_ticket", { ...leak, new_problem: true }, { ...ctx, requestId: "req-afternoon" });
     expect(afternoon.result).toMatchObject({ ok: true, data: { duplicate: false, priority: "emergency" } });
     expect(await repo.listTickets("tenant_olivia")).toHaveLength(2);
+  });
+
+  it("the same kind of problem in a later request is added to the open ticket, escalating it: no duplicate", async () => {
+    const { repo, ctx, call } = setup("tenant_olivia", "req-morning");
+    const first = await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Damp patch on the ceiling" });
+    const firstId = first.result.ok ? (first.result.data as { ticket_id: string }).ticket_id : "";
+    const later = await call("create_maintenance_ticket", leak, { ...ctx, requestId: "req-afternoon" });
+    expect(later.result).toMatchObject({
+      ok: true,
+      data: { ticket_id: firstId, added_to_existing_ticket: true, escalated: true, priority: "emergency", sent_to_human_review: true },
+    });
+    expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+    expect((await repo.listTicketUpdates(firstId)).map((u) => u.details)).toEqual(["kitchen ceiling: Water is leaking from my ceiling"]);
+  });
+
+  describe("with several open tickets of the same kind", () => {
+    async function twoOpenPlumbing() {
+      const t = setup("tenant_olivia", "req-tap");
+      await t.call("create_maintenance_ticket", { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" });
+      await t.call("create_maintenance_ticket", { ...leak, hazards: [], location: "kitchen ceiling", description: "Damp patch", new_problem: true }, { ...t.ctx, requestId: "req-damp" });
+      return t;
+    }
+
+    it("writes nothing and asks for the ticket when it can't tell which one the tenant means", async () => {
+      const { repo, ctx, call } = await twoOpenPlumbing();
+      const before = await repo.listTickets("tenant_olivia");
+      const out = await call("create_maintenance_ticket", { ...leak, hazards: [], location: null, description: "It's worse" }, { ...ctx, requestId: "req-3" });
+      expect(out.result).toMatchObject({ ok: false, stage: "authorize", code: "choose_ticket" });
+      expect(await repo.listTickets("tenant_olivia")).toEqual(before);
+      for (const t of before) expect(await repo.listTicketUpdates(t.id)).toEqual([]);
+    });
+
+    it("an emergency is never held back: it gets its own ticket and a review, the others are untouched", async () => {
+      const { repo, ctx, call } = await twoOpenPlumbing();
+      const out = await call("create_maintenance_ticket", leak, { ...ctx, requestId: "req-3" });
+      expect(out.result).toMatchObject({ ok: true, data: { duplicate: false, priority: "emergency", sent_to_human_review: true } });
+      const tickets = await repo.listTickets("tenant_olivia");
+      expect(tickets.map((t) => t.priority).sort()).toEqual(["emergency", "normal", "normal"]);
+    });
+  });
+
+  describe("retries and repeated calls in one request", () => {
+    const idOf = (out: { result: { ok: boolean; data?: unknown } }) => (out.result.ok ? (out.result.data as { ticket_id: string }).ticket_id : "");
+
+    it("a second call in the same request that adds a missed gas smell escalates; an identical retry adds nothing", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-open");
+      const id = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Boiler making noises", category: "heating", location: "kitchen" }));
+      const same = { ...ctx, requestId: "req-follow-up" };
+      const first = await call("add_details_to_ticket", { ticket_id: id, details: "It's louder", hazards: [] }, same);
+      expect(first.result).toMatchObject({ ok: true, data: { escalated: false } });
+      const second = await call("add_details_to_ticket", { ticket_id: id, details: "And I can smell gas", hazards: ["gas_smell"] }, same);
+      expect(second.result).toMatchObject({ ok: true, data: { escalated: true, priority: "emergency", sent_to_human_review: true } });
+      const reviewsBefore = (await repo.listReviews("tenant_olivia")).length;
+      const retry = await call("add_details_to_ticket", { ticket_id: id, details: "And I can smell gas", hazards: ["gas_smell"] }, same);
+      expect(retry.result).toMatchObject({ ok: true, data: { priority: "emergency", sent_to_human_review: false } });
+      expect(await repo.listTicketUpdates(id)).toHaveLength(2);
+      // The escalation's review was added once; the identical retry adds none.
+      expect((await repo.listReviews("tenant_olivia")).some((r) => r.reason.startsWith("escalated by a repeated report"))).toBe(true);
+      expect(await repo.listReviews("tenant_olivia")).toHaveLength(reviewsBefore);
+    });
+
+    it("the same through the duplicate guard: a second create in the request with the gas smell escalates", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-open");
+      const heating = { ...leak, category: "heating", location: "kitchen", hazards: [] as string[] };
+      const id = idOf(await call("create_maintenance_ticket", { ...heating, description: "Boiler making noises" }));
+      const same = { ...ctx, requestId: "req-follow-up" };
+      await call("create_maintenance_ticket", { ...heating, description: "It's louder" }, same);
+      const gas = await call("create_maintenance_ticket", { ...heating, description: "I can smell gas", hazards: ["gas_smell"] }, same);
+      expect(gas.result).toMatchObject({ ok: true, data: { ticket_id: id, added_to_existing_ticket: true, escalated: true, priority: "emergency" } });
+      expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+    });
+
+    it("retrying a request that created ticket A returns A, even after B (same kind) was opened", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-a");
+      const tap = { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" };
+      const a = idOf(await call("create_maintenance_ticket", tap));
+      const b = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Damp patch", new_problem: true }, { ...ctx, requestId: "req-b" }));
+      const retry = await call("create_maintenance_ticket", tap, { ...ctx, requestId: "req-a" });
+      expect(retry.result).toMatchObject({ ok: true, data: { ticket_id: a, duplicate: true } });
+      expect(await repo.listTicketUpdates(b)).toEqual([]);
+      expect(await repo.listTickets("tenant_olivia")).toHaveLength(2);
+    });
+
+    it("retrying a report the guard added to A returns A again, even after B (same kind) was opened", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-a");
+      const a = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], location: "bathroom", description: "Dripping tap" }));
+      const again = { ...leak, hazards: [], location: "bathroom", description: "Still dripping" };
+      const redirected = await call("create_maintenance_ticket", again, { ...ctx, requestId: "req-r" });
+      expect(redirected.result).toMatchObject({ ok: true, data: { ticket_id: a, added_to_existing_ticket: true } });
+      const b = idOf(await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Damp patch", new_problem: true }, { ...ctx, requestId: "req-b" }));
+      // Two open plumbing tickets now: without the lookup this would be "choose_ticket" or go to B.
+      const retry = await call("create_maintenance_ticket", again, { ...ctx, requestId: "req-r" });
+      expect(retry.result).toMatchObject({ ok: true, data: { ticket_id: a, added_to_existing_ticket: true } });
+      expect(await repo.listTicketUpdates(a)).toHaveLength(1);
+      expect(await repo.listTicketUpdates(b)).toEqual([]);
+    });
+  });
+
+  it("get_property_context lists only the tenant's own open tickets", async () => {
+    const { repo, call } = setup("tenant_olivia");
+    const mine = await call("create_maintenance_ticket", leak);
+    const mineId = mine.result.ok ? (mine.result.data as { ticket_id: string }).ticket_id : "";
+    const closed = await call("create_maintenance_ticket", dishwasher("prop_mcr_1"));
+    repo.closeTicket(closed.result.ok ? (closed.result.data as { ticket_id: string }).ticket_id : "");
+    await setup("tenant_james", "req-james", repo).call("create_maintenance_ticket", { ...leak, property_id: "prop_lds_1" });
+    const out = await call("get_property_context", {});
+    const open = out.result.ok ? (out.result.data as { open_tickets: { ticket_id: string }[] }).open_tickets : [];
+    expect(open.map((t) => t.ticket_id)).toEqual([mineId]);
+  });
+
+  describe("add_details_to_ticket", () => {
+    it("adds details to the tenant's open ticket; new hazards can raise it, never lower it", async () => {
+      const { repo, ctx, call } = setup("tenant_olivia", "req-1");
+      const created = await call("create_maintenance_ticket", { ...leak, hazards: [], description: "Damp patch" });
+      const id = created.result.ok ? (created.result.data as { ticket_id: string }).ticket_id : "";
+      const out = await call(
+        "add_details_to_ticket",
+        { ticket_id: id, details: "Now it's pouring", hazards: ["active_water_leak"] },
+        { ...ctx, requestId: "req-2" },
+      );
+      expect(out.result).toMatchObject({ ok: true, data: { ticket_id: id, added_to_existing_ticket: true, escalated: true, priority: "emergency" } });
+      const calmer = await call("add_details_to_ticket", { ticket_id: id, details: "It stopped", hazards: [] }, { ...ctx, requestId: "req-3" });
+      expect(calmer.result).toMatchObject({ ok: true, data: { escalated: false, priority: "emergency" } });
+      expect(await repo.listTickets("tenant_olivia")).toHaveLength(1);
+    });
+
+    it("rejects another tenant's ticket at authorize, like a missing one", async () => {
+      const { repo, call } = setup("tenant_james");
+      const theirs = await setup("tenant_olivia", "req-o", repo).call("create_maintenance_ticket", leak);
+      const id = theirs.result.ok ? (theirs.result.data as { ticket_id: string }).ticket_id : "";
+      const out = await call("add_details_to_ticket", { ticket_id: id, details: "Still leaking", hazards: [] });
+      expect(out.result).toMatchObject({ ok: false, stage: "authorize", code: "ticket_not_found" });
+      expect(await repo.listTicketUpdates(id)).toEqual([]);
+    });
+
+    it("rejects a closed ticket at authorize: the problem needs a new ticket", async () => {
+      const { repo, call } = setup("tenant_olivia");
+      const created = await call("create_maintenance_ticket", leak);
+      const id = created.result.ok ? (created.result.data as { ticket_id: string }).ticket_id : "";
+      repo.closeTicket(id);
+      const out = await call("add_details_to_ticket", { ticket_id: id, details: "It's back", hazards: [] });
+      expect(out.result).toMatchObject({ ok: false, stage: "authorize", code: "ticket_closed" });
+    });
   });
 
   it.each([

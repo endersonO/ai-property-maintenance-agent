@@ -65,15 +65,33 @@ const RUN_COLUMNS = (sql: postgres.Sql) => sql`
 // the Quality panel to the traces behind it in one click.
 export type RunChecks = { flagged: number; pending: number };
 
+// What a run left behind, in its CURRENT state: tickets it created, tickets it escalated (taken
+// from the create tool's recorded result, escalated: true — an escalated ticket keeps the run id
+// of the run that created it), and its reviews. A review requested for an older ticket is a
+// review, not an escalation.
+export type RunOutcome = {
+  tickets: { id: string; priority: string; status: string; escalated: boolean }[];
+  reviewsPending: number;
+  reviewsTotal: number;
+};
+
+// Ticket ids a run escalated, from its recorded create_maintenance_ticket results.
+const ESCALATED_BY = (sql: postgres.Sql, runId: postgres.PendingQuery<postgres.Row[]>) => sql`
+  select e.payload -> 'result' -> 'data' ->> 'ticket_id'
+  from run_events e
+  where e.run_id = ${runId} and e.type = 'tool_call' and e.tool_name = 'create_maintenance_ticket'
+    and e.status = 'ok' and (e.payload -> 'result' -> 'data' ->> 'escalated') = 'true'
+`;
+
 export async function listRuns(
   sql: postgres.Sql,
   options: { limit?: number; evaluators?: { id: string; version: number }[]; failing?: string | null } = {},
-): Promise<(RunRow & { checks: RunChecks })[]> {
+): Promise<(RunRow & { checks: RunChecks; outcome: RunOutcome })[]> {
   const { limit = 50, evaluators = [], failing = null } = options;
   const ids = evaluators.map((e) => e.id);
   const versions = evaluators.map((e) => e.version);
   const rows = await sql`
-    select ${RUN_COLUMNS(sql)}, c.flagged, c.pending
+    select ${RUN_COLUMNS(sql)}, c.flagged, c.pending, o.tickets, o.reviews_pending, o.reviews_total
     from runs r
     left join tenants t on t.id = r.tenant_id
     left join agencies a on a.id = r.agency_id
@@ -85,6 +103,18 @@ export async function listRuns(
       left join run_evaluations v
         on v.run_id = r.id and v.evaluator_id = e.id and v.evaluator_version = e.version
     ) c
+    cross join lateral (
+      select
+        coalesce((
+          select json_agg(json_build_object('id', tk.id, 'priority', tk.priority, 'status', tk.status,
+                                            'escalated', tk.run_id is distinct from r.id) order by tk.created_at)
+          from tickets tk
+          where tk.run_id = r.id
+             or tk.id::text in (${ESCALATED_BY(sql, sql`r.id`)})
+        ), '[]'::json) as tickets,
+        (select count(*) from review_queue q where q.run_id = r.id and q.status = 'pending') as reviews_pending,
+        (select count(*) from review_queue q where q.run_id = r.id) as reviews_total
+    ) o
     where ${failing}::text is null or exists (
       select 1
       from unnest(${ids}::text[], ${versions}::int[]) as e(id, version)
@@ -95,7 +125,11 @@ export async function listRuns(
     order by r.created_at desc
     limit ${limit}
   `;
-  return rows.map((r) => ({ ...toRun(r), checks: { flagged: Number(r.flagged), pending: Number(r.pending) } }));
+  return rows.map((r) => ({
+    ...toRun(r),
+    checks: { flagged: Number(r.flagged), pending: Number(r.pending) },
+    outcome: { tickets: r.tickets, reviewsPending: Number(r.reviews_pending), reviewsTotal: Number(r.reviews_total) },
+  }));
 }
 
 // Verdicts of one run for the current evaluator versions (missing = pending).
@@ -149,7 +183,12 @@ export async function getRunDetail(sql: postgres.Sql, runId: string) {
 
   const [events, tickets, reviews] = await Promise.all([
     sql`select seq, type, tool_name, stage, status, duration_ms, payload from run_events where run_id = ${runId} order by seq`,
-    sql`select id, priority, category, policy_version, estimated_cost_gbp from tickets where run_id = ${runId}`,
+    sql`
+      select id, priority, category, policy_version, estimated_cost_gbp, status, run_id <> ${runId} as escalated
+      from tickets
+      where run_id = ${runId}
+         or id::text in (${ESCALATED_BY(sql, sql`${runId}::uuid`)})
+    `,
     sql`select source, reason, status, ticket_id from review_queue where run_id = ${runId}`,
   ]);
 
@@ -172,6 +211,9 @@ export async function getRunDetail(sql: postgres.Sql, runId: string) {
       category: t.category as string,
       policyVersion: t.policy_version as number,
       estimatedCostGbp: Number(t.estimated_cost_gbp),
+      // Its state now, not when the run ended.
+      status: t.status as string,
+      escalated: t.escalated as boolean,
     })),
     reviews: reviews.map((r) => ({
       source: r.source as string,

@@ -58,6 +58,101 @@ export async function managerScope(sql: postgres.Sql, managerId: string): Promis
   return row ? { managerId: row.id, name: row.name, agencyIds: row.agency_ids } : null;
 }
 
+// One open ticket to attend, as a manager sees it: what, where, since when, and what's missing.
+export type AttentionItem = {
+  ticketId: string;
+  priority: "emergency" | "high" | "normal" | "low";
+  status: string;
+  category: string;
+  location: string | null;
+  description: string;
+  agencyName: string;
+  address: string;
+  city: string;
+  tenantName: string;
+  createdAt: Date;
+  ageHours: number;
+  // The run that reported it (the conversation), if any.
+  runId: string | null;
+  // Pending human review, with the system's reason; null when none is pending.
+  pendingReview: string | null;
+};
+
+// A request for a person with no ticket behind it (e.g. a rent question passed to the agency).
+export type PendingReviewItem = {
+  reviewId: string;
+  agencyName: string;
+  tenantName: string;
+  reason: string;
+  createdAt: Date;
+  ageHours: number;
+  runId: string | null;
+};
+
+// Open live tickets in the manager's scope, most urgent first: emergencies, then by age.
+// Read-only: approving reviews belongs to the agency review iteration.
+export async function readAttentionQueue(sql: postgres.Sql, agencyIds: string[], limit = 20) {
+  const rows = await sql`
+    select t.id, t.priority, t.status, t.category, t.location, t.description, t.created_at, t.run_id,
+           extract(epoch from now() - t.created_at) / 3600 as age_hours,
+           a.name as agency_name, p.address, p.city, te.name as tenant_name,
+           (select q.reason from review_queue q
+             where q.ticket_id = t.id and q.status = 'pending' order by q.created_at desc limit 1) as pending_review,
+           count(*) over () as total
+    from tickets t
+    join agencies a on a.id = t.agency_id
+    join properties p on p.id = t.property_id
+    join tenants te on te.id = t.tenant_id
+    where t.agency_id = any(${agencyIds}) and t.status in ('open', 'in_progress')
+    order by array_position(array['emergency', 'high', 'normal', 'low'], t.priority), t.created_at
+    limit ${limit}
+  `;
+  // Reviews waiting for a person without any ticket: also something to attend, never hidden
+  // behind "nothing open".
+  const reviews = await sql`
+    select q.id, q.reason, q.created_at, q.run_id, extract(epoch from now() - q.created_at) / 3600 as age_hours,
+           a.name as agency_name, te.name as tenant_name
+    from review_queue q
+    join agencies a on a.id = q.agency_id
+    join tenants te on te.id = q.tenant_id
+    where q.agency_id = any(${agencyIds}) and q.status = 'pending' and q.ticket_id is null
+    order by q.created_at
+    limit ${limit}
+  `;
+  return {
+    reviewsWithoutTicket: reviews.map(
+      (r): PendingReviewItem => ({
+        reviewId: r.id,
+        agencyName: r.agency_name,
+        tenantName: r.tenant_name,
+        reason: r.reason,
+        createdAt: r.created_at,
+        ageHours: Number(r.age_hours),
+        runId: r.run_id,
+      }),
+    ),
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+    items: rows.map(
+      (r): AttentionItem => ({
+        ticketId: r.id,
+        priority: r.priority,
+        status: r.status,
+        category: r.category,
+        location: r.location,
+        description: r.description,
+        agencyName: r.agency_name,
+        address: r.address,
+        city: r.city,
+        tenantName: r.tenant_name,
+        createdAt: r.created_at,
+        ageHours: Number(r.age_hours),
+        runId: r.run_id,
+        pendingReview: r.pending_review,
+      }),
+    ),
+  };
+}
+
 export type OperationsHistory = {
   dataset: "synthetic";
   asOf: Date;
@@ -71,6 +166,8 @@ export type OperationsDashboard = {
   agencies: { id: string; name: string; acquiredOn: string | null; onboardedOn: string | null }[];
   // Live tickets now: always available, demonstration history or not.
   openNow: { facts: Fact[]; notes: string[]; now: Date };
+  // The open tickets themselves, most urgent first (live).
+  attention: { total: number; items: AttentionItem[]; reviewsWithoutTicket: PendingReviewItem[] };
   // The synthetic history; null when it hasn't been generated.
   history: OperationsHistory | null;
 };
@@ -84,6 +181,7 @@ export async function operationsDashboard(sql: postgres.Sql, agencyIds: string[]
       from agencies where id = any(${agencyIds}) order by name
     `;
     const openNow = await readOpenNow(tx, agencyIds);
+    const attention = await readAttentionQueue(tx, agencyIds);
     const [meta] = await tx`select as_of from synthetic_history_meta`;
     let history: OperationsHistory | null = null;
     if (meta) {
@@ -101,6 +199,7 @@ export async function operationsDashboard(sql: postgres.Sql, agencyIds: string[]
     return {
       agencies: agencies.map((a) => ({ id: a.id, name: a.name, acquiredOn: a.acquired_on, onboardedOn: a.onboarded_on })),
       openNow,
+      attention,
       history,
     };
   });

@@ -3,10 +3,11 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { getSql } from "@/infra/db";
 import type { Fact } from "@/infra/operations-queries";
-import { managerScope, operationsDashboard } from "@/infra/postgres-operations";
+import { managerScope, operationsDashboard, type AttentionItem, type PendingReviewItem } from "@/infra/postgres-operations";
 import { checkAccess } from "@/server/access";
 import { clientKey } from "@/server/http";
 import { AccessForm } from "../access-form";
+import { Icon, PriorityBadge } from "../ui";
 import { DemoNav } from "../site-nav";
 import { BriefBox } from "./brief-box";
 import { lastTwelveMonthKeys } from "@/operations/periods";
@@ -36,6 +37,87 @@ function Tile({ label, value, detail }: { label: string; value: string; detail?:
       <dd className="font-mono text-title tabular-nums">{value}</dd>
       {detail && <dd className="text-label text-muted">{detail}</dd>}
     </div>
+  );
+}
+
+const age = (hours: number) =>
+  hours < 1 ? `${Math.max(1, Math.round(hours * 60))} min` : hours < 48 ? `${Math.round(hours)} h` : `${Math.round(hours / 24)} days`;
+
+// One incident to attend. Read-only: it shows what, where, since when and what's missing, and
+// links to the conversation that reported it. Approving reviews is the agency-review iteration.
+function AttentionCard({ item, codeSuffix }: { item: AttentionItem; codeSuffix: string }) {
+  const urgent = item.priority === "emergency";
+  return (
+    <li
+      className={`space-y-2 rounded-lg border bg-surface p-4 shadow-panel ${urgent ? "border-emergency border-t-4" : "border-border"}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <PriorityBadge priority={item.priority} />
+          <span className="text-body-sm font-medium">{item.agencyName}</span>
+        </span>
+        <span className={`text-label tabular-nums ${urgent ? "font-medium text-emergency" : "text-muted"}`}>
+          open {age(item.ageHours)}
+        </span>
+      </div>
+      <p className="text-body-sm text-muted">
+        {item.address}, {item.city}
+      </p>
+      <div>
+        <p className="font-medium">
+          {item.category.charAt(0).toUpperCase() + item.category.slice(1)}
+          {item.location && ` · ${item.location}`}
+        </p>
+        <p className="text-body-sm">&ldquo;{item.description}&rdquo;</p>
+      </div>
+      <p className="text-label text-muted">
+        Reported by {item.tenantName} via the assistant · <span className="font-mono">#{item.ticketId.slice(0, 8)}</span>
+      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
+        {item.pendingReview ? (
+          <span className="flex items-start gap-1.5 text-label text-review">
+            <Icon name="person" className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Waiting for human review — <span className="text-muted">{item.pendingReview}</span>
+            </span>
+          </span>
+        ) : (
+          <span className="text-label text-muted">{item.status === "in_progress" ? "In progress" : "Open, no review needed"}</span>
+        )}
+        {item.runId && (
+          <a href={`/inspector/${item.runId}${codeSuffix}`} className="text-label text-accent underline-offset-2 hover:underline">
+            View conversation →
+          </a>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// A request for a person with no ticket (e.g. a rent question). Read-only, like the tickets.
+function ReviewCard({ item, codeSuffix }: { item: PendingReviewItem; codeSuffix: string }) {
+  return (
+    <li className="space-y-2 rounded-lg border border-border bg-surface p-4 shadow-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-sm bg-review-soft px-2 py-0.5 text-label font-medium text-review">
+            <Icon name="person" className="size-3.5" />
+            Person requested
+          </span>
+          <span className="text-body-sm font-medium">{item.agencyName}</span>
+        </span>
+        <span className="text-label tabular-nums text-muted">waiting {age(item.ageHours)}</span>
+      </div>
+      <p className="text-body-sm">{item.reason}</p>
+      <p className="text-label text-muted">From {item.tenantName} via the assistant · no ticket</p>
+      {item.runId && (
+        <div className="border-t border-border pt-2 text-right">
+          <a href={`/inspector/${item.runId}${codeSuffix}`} className="text-label text-accent underline-offset-2 hover:underline">
+            View conversation →
+          </a>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -129,6 +211,41 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/operation
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section aria-labelledby="attention-heading" className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="attention-heading" className="text-title font-semibold">
+            Needs attention
+          </h2>
+          <p className="text-body-sm text-muted">
+            {[
+              data.attention.total === 0
+                ? "No open tickets"
+                : `${data.attention.total} open · ${v("open_now_emergency", "all", "now")?.value ?? 0} emergencies`,
+              data.attention.reviewsWithoutTicket.length > 0 &&
+                `${data.attention.reviewsWithoutTicket.length} ${data.attention.reviewsWithoutTicket.length === 1 ? "person requested" : "people requested"} without a ticket`,
+              (data.attention.total > 0 || data.attention.reviewsWithoutTicket.length > 0) && "most urgent first",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        </div>
+        {(data.attention.items.length > 0 || data.attention.reviewsWithoutTicket.length > 0) && (
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {data.attention.items.map((item) => (
+              <AttentionCard key={item.ticketId} item={item} codeSuffix={typeof code === "string" && code ? `?code=${encodeURIComponent(code)}` : ""} />
+            ))}
+            {data.attention.reviewsWithoutTicket.map((item) => (
+              <ReviewCard key={item.reviewId} item={item} codeSuffix={typeof code === "string" && code ? `?code=${encodeURIComponent(code)}` : ""} />
+            ))}
+          </ul>
+        )}
+        {data.attention.total > data.attention.items.length && (
+          <p className="text-label text-muted">
+            Showing the {data.attention.items.length} most urgent of {data.attention.total}.
+          </p>
+        )}
       </section>
 
       {h ? (

@@ -15,7 +15,7 @@ import {
 import { evaluators as allEvaluators } from "@/evaluators";
 import { evaluateRun, snapshotFromResult } from "@/runtime/evaluation";
 import { replaceSyntheticHistory } from "@/infra/operations-store";
-import { managerScope, operationsDashboard, PostgresOperations } from "@/infra/postgres-operations";
+import { managerScope, operationsDashboard, PostgresOperations, readAttentionQueue } from "@/infra/postgres-operations";
 import { readOpenNow, resolutionFacts, volumeFacts, type Fact } from "@/infra/operations-queries";
 import { demoHistoryAgencies, generateHistory } from "@/operations/history";
 
@@ -1037,6 +1037,84 @@ describe.skipIf(!url)("PostgreSQL integration", () => {
       const v = Object.fromEntries(dashboard.openNow.facts.map((f) => [f.key, [f.value, f.unit]]));
       expect(v["open_now_emergency.agency_northbridge.now"]).toEqual([1, "tickets"]);
       expect(v["reviews_pending.agency_northbridge.now"]).toEqual([1, "reviews"]);
+    });
+
+    it("the attention queue lists open tickets in scope, emergencies first, oldest first, with the pending review", async () => {
+      const runId = await newRun();
+      const make = async (key: string, priority: "emergency" | "normal", hoursAgo: number, extra: Partial<NewTicket> = {}) => {
+        const review = priority === "emergency"
+          ? { runId, agencyId: extra.agencyId ?? "agency_northbridge", tenantId: extra.tenantId ?? "tenant_olivia", source: "policy" as const, reason: "emergencies always require human review" }
+          : null;
+        const { ticket: t } = await repo.createTicketWithReview({ ...ticket(runId), idempotencyKey: key, priority, ...extra }, review);
+        await sql`update tickets set created_at = now() - make_interval(hours => ${hoursAgo}) where id = ${t.id}`;
+        return t.id;
+      };
+      const routineOld = await make("routine-old", "normal", 30);
+      const emergencyNew = await make("emergency-new", "emergency", 2);
+      const emergencyOld = await make("emergency-old", "emergency", 10);
+      const resolved = await make("resolved", "normal", 50);
+      await sql`update tickets set status = 'resolved', resolved_at = now() where id = ${resolved}`;
+      // Outside the scope.
+      await make("hl", "emergency", 40, { agencyId: "agency_harbour_lane", propertyId: "prop_bri_1", tenantId: "tenant_priya" });
+
+      const queue = await readAttentionQueue(sql, ["agency_northbridge"]);
+      expect(queue.total).toBe(3);
+      expect(queue.items.map((i) => i.ticketId)).toEqual([emergencyOld, emergencyNew, routineOld]);
+      expect(queue.items[0]).toMatchObject({
+        agencyName: "Northbridge Lettings",
+        address: "Flat 4, 18 Mill Lane",
+        tenantName: "Olivia Bennett",
+        runId,
+        pendingReview: "emergencies always require human review",
+      });
+      expect(queue.items[0].ageHours).toBeCloseTo(10, 0);
+      expect(queue.items[2].pendingReview).toBeNull();
+      // The limit keeps the most urgent and reports the total.
+      const top = await readAttentionQueue(sql, ["agency_northbridge"], 1);
+      expect([top.total, top.items.map((i) => i.ticketId)]).toEqual([3, [emergencyOld]]);
+    });
+
+    it("a run's outcome attributes escalations from the tool's recorded result, not from reviews", async () => {
+      const traced = (requestId: string, script: ConstructorParameters<typeof ScriptedModel>[0]) =>
+        runAgent({
+          workflow: maintenanceWorkflow,
+          model: new ScriptedModel(script),
+          deps: { repo },
+          actorId: "tenant_olivia",
+          requestId,
+          userMessage: "Water is pouring through my ceiling",
+          trace: { store: new PostgresTraceStore(sql), meta: { source: "portal", agencyId: "agency_northbridge", tenantId: "tenant_olivia" } },
+        });
+      const create = (hazards: string[]) => ({
+        toolCalls: [{ name: "create_maintenance_ticket", args: { property_id: "prop_mcr_1", category: "plumbing", hazards, location: null, description: "Leak" } }],
+      });
+      // A creates a routine ticket; B (a retry of the same request) escalates it to emergency.
+      const a = await traced("req-same", [create([]), { text: "Logged." }]);
+      const b = await traced("req-same", [create(["active_water_leak"]), { text: "Escalated." }]);
+      const [ticketRow] = await sql`select id from tickets`;
+      // C asks for a person about the (existing) ticket: a review, not an escalation.
+      const c = await traced("req-other", [
+        { toolCalls: [{ name: "request_human_review", args: { reason: "Tenant upset", ticket_id: ticketRow.id } }] },
+        { text: "A person will call you." },
+      ]);
+
+      const byRun = Object.fromEntries((await listRuns(sql)).map((r) => [r.id, r.outcome]));
+      expect(byRun[a.runId].tickets).toMatchObject([{ id: ticketRow.id, escalated: false }]);
+      expect(byRun[b.runId].tickets).toMatchObject([{ id: ticketRow.id, priority: "emergency", escalated: true }]);
+      expect(byRun[c.runId]).toMatchObject({ tickets: [], reviewsTotal: 1, reviewsPending: 1 });
+      expect((await getRunDetail(sql, c.runId))?.tickets).toEqual([]);
+      expect((await getRunDetail(sql, b.runId))?.tickets).toMatchObject([{ escalated: true, status: "open" }]);
+    });
+
+    it("the attention queue also lists people requested without a ticket", async () => {
+      const runId = await newRun();
+      await repo.createReview({ runId, agencyId: "agency_northbridge", tenantId: "tenant_olivia", ticketId: null, source: "agent", reason: "Asked about withholding rent" });
+      const queue = await readAttentionQueue(sql, ["agency_northbridge"]);
+      expect(queue.total).toBe(0);
+      expect(queue.reviewsWithoutTicket).toMatchObject([
+        { agencyName: "Northbridge Lettings", tenantName: "Olivia Bennett", reason: "Asked about withholding rent", runId },
+      ]);
+      expect(await readAttentionQueue(sql, ["agency_harbour_lane"])).toMatchObject({ total: 0, reviewsWithoutTicket: [] });
     });
 
     it("loads a manager's scope from the database, and null for an unknown one", async () => {

@@ -99,3 +99,35 @@ const VERDICT = {
 export function VerdictBadge({ verdict }: { verdict: keyof typeof VERDICT }) {
   return <span className={`rounded-sm px-2 py-0.5 text-label font-medium ${VERDICT[verdict]}`}>{verdict}</span>;
 }
+
+// What a run left behind, in its current state — so "completed" (the run) is never read as
+// "resolved" (the problem).
+export function RunOutcomeCell({
+  outcome,
+}: {
+  outcome: { tickets: { id: string; priority: string; status: string; escalated: boolean }[]; reviewsPending: number; reviewsTotal: number };
+}) {
+  if (outcome.tickets.length === 0) {
+    return (
+      <span className="text-label text-muted">
+        {outcome.reviewsTotal > 0 ? `review requested${outcome.reviewsPending ? " · pending" : ""}` : "no ticket"}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-col gap-0.5 text-label">
+      {outcome.tickets.map((t) => (
+        <span key={t.id} className="whitespace-nowrap">
+          <span className="font-mono text-muted">#{t.id.slice(0, 8)}</span>{" "}
+          <span className={t.priority === "emergency" ? "font-medium text-emergency" : ""}>{t.priority}</span>
+          {t.escalated && <span className="text-muted"> (escalated)</span>}
+          {" · "}
+          <span className={t.status === "open" || t.status === "in_progress" ? "font-medium text-foreground" : "text-muted"}>
+            {t.status === "in_progress" ? "in progress" : t.status}
+          </span>
+        </span>
+      ))}
+      {outcome.reviewsPending > 0 && <span className="text-review">human review pending</span>}
+    </span>
+  );
+}
